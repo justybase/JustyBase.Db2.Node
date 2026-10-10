@@ -1,7 +1,7 @@
 # JustyBase Db2 for Node.js
 
 <p align="center">
-  <img src="assets/ts-db2-banner.png" alt="JustyBase Db2 for Node.js visual identity" width="100%" />
+  <img src="assets/justybase-db2-node-banner.png" alt="JustyBase Db2 for Node.js visual identity" width="100%" />
 </p>
 
 > Managed Node.js driver for **IBM Db2 LUW**, speaking DRDA/DDM directly over TCP/TLS without IBM CLI runtime dependencies.
