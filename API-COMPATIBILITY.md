@@ -57,4 +57,4 @@ node tools/api/generate-ts-surface.cjs --check  # CI check; fails on drift
 
 Do **not** regenerate the snapshot merely to make CI green.
 
-The npm package remains `private: true` in the private release-preparation repository. The fresh public repository will remove that publication guard only as an explicit release step.
+The public repository intentionally keeps the npm package `private: true` until the first npm release is explicitly prepared. Removing that publication guard is a separate release step and should be reviewed together with the publishing workflow and release metadata.
