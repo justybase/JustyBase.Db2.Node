@@ -1,0 +1,14 @@
+node_modules
+dist/
+coverage/
+.env
+.env.*
+sbom-out/
+release-out/
+
+# Generated test credentials / certificates. Never commit private key material.
+tests/fixtures/tls/
+*-key.pem
+*.key
+*.p12
+*.pfx

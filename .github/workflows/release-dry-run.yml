@@ -1,0 +1,73 @@
+name: Release dry run
+
+# Manual only: builds, tests and packs the exact npm tarball that would be
+# released, validates it, installs it in clean consumers, then uploads artifacts.
+# No registry credentials and no publish step.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build, pack and verify (no publish)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Verify OpenSSL for TLS tests
+        run: openssl version
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build
+
+      - name: Check API surface
+        run: node tools/api/generate-ts-surface.cjs --check
+
+      - name: Offline unit and protocol tests
+        run: node --test tests/*.test.js
+
+      - name: ESM entry smoke test
+        run: npm run test:esm
+
+      - name: Pack once
+        shell: bash
+        run: |
+          rm -rf release-out && mkdir release-out
+          npm pack --pack-destination release-out --json > "${{ runner.temp }}/npm-pack.json"
+          cat "${{ runner.temp }}/npm-pack.json"
+          PACKAGE_FILE="$(node -e "const fs=require('node:fs'); const x=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); process.stdout.write(x[0].filename)" "${{ runner.temp }}/npm-pack.json")"
+          test -n "$PACKAGE_FILE"
+          test -f "release-out/$PACKAGE_FILE"
+          echo "PACKAGE_TGZ=release-out/$PACKAGE_FILE" >> "$GITHUB_ENV"
+
+      - name: Validate exact npm tarball
+        run: node tools/sbom/check-package-contents.cjs "$PACKAGE_TGZ"
+
+      - name: Consumer smoke against exact tarball
+        run: node tools/package/consumer-smoke.cjs "$PACKAGE_TGZ"
+
+      - name: Generate SBOM (offline)
+        run: node tools/sbom/generate-ts-sbom.cjs release-out
+
+      - name: Upload dry-run artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: JustyBase.Db2.Node-release-dry-run
+          path: release-out/
+          if-no-files-found: error

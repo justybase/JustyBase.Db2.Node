@@ -1,0 +1,371 @@
+{
+  "generator": "tools/api/generate-ts-surface.cjs",
+  "package": "@justybase/db2",
+  "items": [
+    {
+      "name": "clearAllDb2Pools",
+      "kind": "function",
+      "declarations": [
+        "export declare function clearAllDb2Pools(): Promise<void>;"
+      ]
+    },
+    {
+      "name": "Config",
+      "kind": "type",
+      "declarations": [
+        "export type Config = { host: string; port: number; database: string; currentSchema?: string; user: string; password: string; useSsl: boolean; sslRootCaPath: string; sslClientCertPath: string; sslClientKeyPath: string; timeoutMs: number; blockSize: number; securityMechanism: number; kerberosSpn: string; kerberosRealm: string; krb5ConfigFile: string; krb5KeytabFile: string; krb5CcacheFile: string; gssapiTokenFile: string; clientApplName: string; clientWrkstnName: string; clientUserid: string; clientAcctng: string; clientCorrToken: string; params: Record<string, string>; };"
+      ]
+    },
+    {
+      "name": "connectDb2",
+      "kind": "function",
+      "declarations": [
+        "export declare function connectDb2(input: string | Config): Promise<Db2Connection>;"
+      ]
+    },
+    {
+      "name": "DB2_RESOURCE_DEFAULTS",
+      "kind": "const",
+      "declarations": [
+        "export declare const DB2_RESOURCE_DEFAULTS: Readonly<{ chunkBytes: number; receiveBufferBytes: number; materializedLobBytes: number; materializedResultBytes: number; maxStreamedLobBytes: number; }>;"
+      ]
+    },
+    {
+      "name": "Db2AuthenticationError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2AuthenticationError extends Db2Error { constructor(message: string, securityCode?: number); }"
+      ]
+    },
+    {
+      "name": "Db2BatchAbortError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2BatchAbortError extends DOMException { readonly completedParameterSets: number; readonly inFlightParameterSetIndex: number | undefined; readonly rowsAffected: number; readonly cause: unknown; constructor(completedParameterSets: number, inFlightParameterSetIndex: number | undefined, rowsAffected: number, cause: unknown); }"
+      ]
+    },
+    {
+      "name": "Db2BatchExecutionError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2BatchExecutionError extends Db2Error { readonly parameterSetIndex: number | undefined; readonly completedParameterSets: number; readonly rowsAffected: number; constructor(parameterSetIndex: number | undefined, completedParameterSets: number, rowsAffected: number, cause: unknown); }"
+      ]
+    },
+    {
+      "name": "Db2BatchTimeoutError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2BatchTimeoutError extends Db2TimeoutError { readonly completedParameterSets: number; readonly inFlightParameterSetIndex: number | undefined; readonly rowsAffected: number; constructor(completedParameterSets: number, inFlightParameterSetIndex: number | undefined, rowsAffected: number, cause: unknown); }"
+      ]
+    },
+    {
+      "name": "Db2BinaryLobStream",
+      "kind": "type",
+      "declarations": [
+        "export type Db2BinaryLobStream = { readonly kind: \"binary-lob\"; readonly length: bigint; stream(): AsyncIterable<Uint8Array>; };"
+      ]
+    },
+    {
+      "name": "Db2ClientInfo",
+      "kind": "type",
+      "declarations": [
+        "export type Db2ClientInfo = { applicationName: string; workstationName: string; userId: string; accounting: string; correlationToken: string; };"
+      ]
+    },
+    {
+      "name": "Db2ConfigurationError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2ConfigurationError extends Db2Error { constructor(message: string, cause?: unknown); }"
+      ]
+    },
+    {
+      "name": "Db2Connection",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2Connection { private constructor(); static connect(input: string | Config): Promise<Db2Connection>; get isClosed(): boolean; get isAutoCommit(): boolean; get currentSessionUser(): string; addWarningListener(listener: (warning: Db2Warning) => void): () => void; interrupt(): Promise<boolean>; switchUser(user: string, password?: string): Promise<void>; query(sql: string, params?: readonly unknown[], options?: QueryOptions): Promise<QueryResult>; queryStream(sql: string, options?: QueryOptions): AsyncGenerator<QueryStreamRow>; queryStreamWithParams(sql: string, params: readonly unknown[], options?: QueryOptions): AsyncGenerator<QueryStreamRow>; execute(sql: string, params?: readonly unknown[], options?: QueryOptions): Promise<number>; executeAdminCommand(command: string, options?: QueryOptions): Promise<number>; executeInsert(sql: string, params?: readonly unknown[], options?: QueryOptions): Promise<Db2InsertResult>; executeBatch(sql: string, parameterSets: readonly (readonly unknown[])[], options?: QueryOptions): Promise<number>; importRows(source: AsyncIterable<readonly unknown[] | QueryStreamRow>, target: Db2ImportTarget, options?: Db2ImportOptions): Promise<Db2ImportProgress>; executeWithOutputs(sql: string, parameters: readonly Db2Parameter[], options?: QueryOptions): Promise<Db2ExecutionResult>; executeProcedureStream(sql: string, parameters?: readonly Db2Parameter[], options?: QueryOptions): Promise<Db2ProcedureReader>; prepare(sql: string, options?: QueryOptions): Promise<Db2Statement>; executeStatementWithOutputs(statement: Db2Statement, parameters: readonly Db2Parameter[], options?: QueryOptions): Promise<Db2ExecutionResult>; ping(): Promise<void>; commit(): Promise<void>; rollback(): Promise<void>; getClientInfo(): Db2ClientInfo; clientInfoMatches(info: Db2ClientInfo): boolean; setClientInfo(info: Partial<Db2ClientInfo>): Promise<void>; resetClientInfo(info: Db2ClientInfo): Promise<void>; get currentDatabase(): string; changeDatabase(database: string, options?: QueryOptions): Promise<void>; setCurrentSchema(schema: string, options?: QueryOptions): Promise<void>; beginTransaction(isolation?: Db2IsolationLevel, options?: QueryOptions): Promise<Db2Transaction>; setAutoCommit(enabled: boolean): void; close(): Promise<void>; }"
+      ]
+    },
+    {
+      "name": "Db2ConnectionClosedError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2ConnectionClosedError extends Db2Error { constructor(message?: string); }"
+      ]
+    },
+    {
+      "name": "Db2ConnectionFactory",
+      "kind": "type",
+      "declarations": [
+        "export type Db2ConnectionFactory = (input: string | Config) => Promise<Db2Connection>;"
+      ]
+    },
+    {
+      "name": "Db2ConnectTimeoutError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2ConnectTimeoutError extends Db2Error { constructor(); }"
+      ]
+    },
+    {
+      "name": "Db2DatabaseNotFoundError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2DatabaseNotFoundError extends Db2Error { constructor(message?: string); }"
+      ]
+    },
+    {
+      "name": "Db2Error",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2Error extends Error { readonly category: Db2ErrorCategory; readonly outcome: Db2OperationOutcome; readonly sqlCode: number | undefined; readonly sqlState: string | undefined; readonly securityCode: number | undefined; constructor(message: string, category: Db2ErrorCategory, options?: { cause?: unknown; sqlCode?: number; sqlState?: string; securityCode?: number; }); }"
+      ]
+    },
+    {
+      "name": "Db2ErrorCategory",
+      "kind": "type",
+      "declarations": [
+        "export type Db2ErrorCategory = \"invalid-connection-string\" | \"invalid-configuration\" | \"connection-closed\" | \"database-not-found\" | \"authentication\" | \"server\" | \"batch-execution\" | \"unsupported-feature\" | \"pool-timeout\" | \"pool-exhausted\" | \"transport\" | \"protocol\" | \"resource-limit\";"
+      ]
+    },
+    {
+      "name": "Db2ExecutionResult",
+      "kind": "type",
+      "declarations": [
+        "export type Db2ExecutionResult = { rowsAffected: number; outputParameters: unknown[]; resultSets?: Db2ResultSet[]; };"
+      ]
+    },
+    {
+      "name": "Db2ImportCommitPolicy",
+      "kind": "type",
+      "declarations": [
+        "export type Db2ImportCommitPolicy = \"atomic\" | \"commitEveryRows\";"
+      ]
+    },
+    {
+      "name": "Db2ImportError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2ImportError extends Error { readonly cause: unknown; readonly failedSourceRow: number | undefined; readonly progress: Db2ImportProgress; constructor(message: string, cause: unknown, failedSourceRow: number | undefined, progress: Db2ImportProgress); }"
+      ]
+    },
+    {
+      "name": "Db2ImportOptions",
+      "kind": "type",
+      "declarations": [
+        "export type Db2ImportOptions = { readonly policy?: Db2ImportCommitPolicy; readonly maxBatchRows?: number; readonly maxBatchBytes?: number; readonly signal?: AbortSignal; readonly timeoutMs?: number; readonly cancelCleanupTimeoutMs?: number; readonly onProgress?: (progress: Db2ImportProgress) => void; readonly notifyAfterRows?: number; readonly tableLock?: boolean; readonly commandTimeoutMs?: number; };"
+      ]
+    },
+    {
+      "name": "Db2ImportProgress",
+      "kind": "type",
+      "declarations": [
+        "export type Db2ImportProgress = { readonly sourceRowsRead: number; readonly committedRows: number; readonly committedBatches: number; readonly estimatedCommittedBytes: number; };"
+      ]
+    },
+    {
+      "name": "Db2ImportTarget",
+      "kind": "type",
+      "declarations": [
+        "export type Db2ImportTarget = { readonly schema?: string; readonly table: string; readonly columns: readonly string[]; readonly expectedSqlTypes?: readonly (number | undefined)[]; };"
+      ]
+    },
+    {
+      "name": "Db2InsertResult",
+      "kind": "type",
+      "declarations": [
+        "export type Db2InsertResult = { rowsAffected: number; lastInsertId: bigint; };"
+      ]
+    },
+    {
+      "name": "Db2IsolationLevel",
+      "kind": "type",
+      "declarations": [
+        "export type Db2IsolationLevel = \"UR\" | \"CS\" | \"RS\" | \"RR\";"
+      ]
+    },
+    {
+      "name": "Db2LobStream",
+      "kind": "type",
+      "declarations": [
+        "export type Db2LobStream = Db2BinaryLobStream | Db2TextLobStream;"
+      ]
+    },
+    {
+      "name": "Db2OperationOutcome",
+      "kind": "type",
+      "declarations": [
+        "export type Db2OperationOutcome = \"not-started\" | \"confirmed\" | \"unknown\";"
+      ]
+    },
+    {
+      "name": "Db2Parameter",
+      "kind": "type",
+      "declarations": [
+        "export type Db2Parameter = { value: unknown; direction: Db2ParameterDirection; };"
+      ]
+    },
+    {
+      "name": "Db2ParameterDirection",
+      "kind": "type",
+      "declarations": [
+        "export type Db2ParameterDirection = \"input\" | \"output\" | \"inputOutput\";"
+      ]
+    },
+    {
+      "name": "Db2Pool",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2Pool { constructor(input: string | Config, options?: Db2PoolOptions); get isClosed(): boolean; get connectionCount(): number; get idleCount(): number; get diagnostics(): { connections: number; idle: number; active: number; waiting: number; discarded: number; acquireTimeouts: number; exhausted: number; }; shutdown(timeoutMs?: number): Promise<void>; withConnection<T>(operation: (connection: Db2Connection) => Promise<T>, options?: Db2PoolAcquireOptions): Promise<T>; query(sql: string, params?: readonly unknown[], options?: QueryOptions): Promise<QueryResult>; executeProcedureStream(sql: string, parameters?: readonly Db2Parameter[], options?: QueryOptions): Promise<Db2ProcedureReader>; queryStream(sql: string, options?: QueryOptions): AsyncGenerator<QueryStreamRow>; queryStreamWithParams(sql: string, params: readonly unknown[], options?: QueryOptions): AsyncGenerator<QueryStreamRow>; execute(sql: string, params?: readonly unknown[], options?: QueryOptions): Promise<number>; executeAdminCommand(command: string, options?: QueryOptions): Promise<number>; executeBatch(sql: string, parameterSets: readonly (readonly unknown[])[], options?: QueryOptions): Promise<number>; close(): Promise<void>; drainIdle(): Promise<void>; }"
+      ]
+    },
+    {
+      "name": "Db2PoolAcquireOptions",
+      "kind": "type",
+      "declarations": [
+        "export type Db2PoolAcquireOptions = { signal?: AbortSignal; };"
+      ]
+    },
+    {
+      "name": "Db2PoolExhaustedError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2PoolExhaustedError extends Db2Error { constructor(); }"
+      ]
+    },
+    {
+      "name": "Db2PoolOptions",
+      "kind": "type",
+      "declarations": [
+        "export type Db2PoolOptions = { maxConnections?: number; maxWaiters?: number; acquireTimeoutMs?: number; connectTimeoutMs?: number; idleTimeoutMs?: number; maxLifetimeMs?: number; reapIntervalMs?: number; connectionFactory?: Db2ConnectionFactory; };"
+      ]
+    },
+    {
+      "name": "Db2PoolTimeoutError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2PoolTimeoutError extends Db2Error { constructor(); }"
+      ]
+    },
+    {
+      "name": "Db2ProcedureReader",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2ProcedureReader { constructor(backend: ProcedureReaderBackend); get resultSetIndex(): number; get resultSetCount(): number; get columns(): readonly ColumnDescription[]; get outputParameters(): readonly unknown[]; rows(): AsyncGenerator<unknown[]>; nextResultSet(): Promise<boolean>; finish(): Promise<Db2ExecutionResult>; close(): Promise<void>; [Symbol.asyncDispose](): Promise<void>; }"
+      ]
+    },
+    {
+      "name": "Db2ResourceBudget",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2ResourceBudget { readonly limitBytes: number; constructor(limitBytes?: number); get usedBytes(): number; reserve(bytes: number): void; release(bytes: number): void; }"
+      ]
+    },
+    {
+      "name": "Db2ResourceLimitError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2ResourceLimitError extends Db2Error { constructor(message: string); }"
+      ]
+    },
+    {
+      "name": "Db2ResultSet",
+      "kind": "type",
+      "declarations": [
+        "export type Db2ResultSet = { columns: ColumnDescription[]; rows: unknown[][]; };"
+      ]
+    },
+    {
+      "name": "Db2ServerError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2ServerError extends Db2Error { constructor(sqlCode: number, sqlState?: string, message?: string); }"
+      ]
+    },
+    {
+      "name": "Db2Statement",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2Statement { readonly sql: string; readonly outputColumns: readonly ColumnDescription[]; readonly parameterColumns: readonly ColumnDescription[]; constructor(connection: Db2Connection, sql: string, outputColumns: readonly ColumnDescription[], parameterColumns: readonly ColumnDescription[]); get isClosed(): boolean; execute(params?: readonly unknown[], options?: QueryOptions): Promise<number>; executeWithOutputs(parameters: readonly Db2Parameter[], options?: QueryOptions): Promise<Db2ExecutionResult>; executeStream(parameters?: readonly Db2Parameter[], options?: QueryOptions): Promise<Db2ProcedureReader>; executeInsert(params?: readonly unknown[], options?: QueryOptions): Promise<Db2InsertResult>; query(params?: readonly unknown[], options?: QueryOptions): Promise<QueryResult>; queryStream(params?: readonly unknown[], options?: QueryOptions): AsyncGenerator<QueryStreamRow>; close(): void; }"
+      ]
+    },
+    {
+      "name": "Db2TextLobStream",
+      "kind": "type",
+      "declarations": [
+        "export type Db2TextLobStream = { readonly kind: \"text-lob\"; readonly length: bigint; stream(): AsyncIterable<string>; };"
+      ]
+    },
+    {
+      "name": "Db2TimeoutError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2TimeoutError extends DOMException { readonly cause?: unknown; constructor(message?: string, cause?: unknown); }"
+      ]
+    },
+    {
+      "name": "Db2Transaction",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2Transaction { constructor(connection: Db2Connection, generation: number); query(sql: string, params?: readonly unknown[], options?: QueryOptions): Promise<QueryResult>; execute(sql: string, params?: readonly unknown[], options?: QueryOptions): Promise<number>; executeInsert(sql: string, params?: readonly unknown[], options?: QueryOptions): Promise<Db2InsertResult>; commit(options?: QueryOptions): Promise<void>; rollback(options?: QueryOptions): Promise<void>; }"
+      ]
+    },
+    {
+      "name": "Db2UnsupportedFeatureError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2UnsupportedFeatureError extends Db2Error { constructor(message: string); }"
+      ]
+    },
+    {
+      "name": "Db2Warning",
+      "kind": "type",
+      "declarations": [
+        "export type Db2Warning = { readonly sqlCode: number; readonly sqlState: string; readonly message: string; readonly warningFlags: string; };"
+      ]
+    },
+    {
+      "name": "DsnError",
+      "kind": "class",
+      "declarations": [
+        "export declare class DsnError extends Db2Error { constructor(message: string); }"
+      ]
+    },
+    {
+      "name": "newConfig",
+      "kind": "function",
+      "declarations": [
+        "export declare function newConfig(): Config;"
+      ]
+    },
+    {
+      "name": "parseDsn",
+      "kind": "function",
+      "declarations": [
+        "export declare function parseDsn(input: string): Config;"
+      ]
+    },
+    {
+      "name": "QueryOptions",
+      "kind": "type",
+      "declarations": [
+        "export type QueryOptions = { signal?: AbortSignal; timeoutMs?: number; cancelCleanupTimeoutMs?: number; user?: string; clientInfo?: Partial<Db2ClientInfo>; };"
+      ]
+    },
+    {
+      "name": "QueryResult",
+      "kind": "type",
+      "declarations": [
+        "export type QueryResult = { columns: ColumnDescription[]; rows: unknown[][]; resultSets?: Db2ResultSet[]; };"
+      ]
+    },
+    {
+      "name": "QueryStreamRow",
+      "kind": "type",
+      "declarations": [
+        "export type QueryStreamRow = { columns: readonly ColumnDescription[]; values: unknown[]; };"
+      ]
+    }
+  ],
+  "digest": "3fdf78c323135a902946ce589a7221e7bdc258d01b614a3ab0bb2d9bc32c4128"
+}

@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    name: Build and offline tests (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24.13.1]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Verify OpenSSL for TLS tests
+        run: openssl version
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build
+
+      - name: Check API surface
+        run: node tools/api/generate-ts-surface.cjs --check
+
+      - name: Offline unit and protocol tests
+        run: node --test tests/*.test.js
+
+      - name: ESM entry smoke test
+        run: npm run test:esm
+
+      - name: Generate SBOM (offline)
+        run: node tools/sbom/generate-ts-sbom.cjs
+
+      - name: Check npm package allowlist
+        run: node tools/sbom/check-package-contents.cjs
+
+  platform-smoke:
+    name: Platform smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build
+
+      - name: Check API surface
+        run: node tools/api/generate-ts-surface.cjs --check
+
+      - name: Cross-platform API/config smoke tests
+        run: node --test tests/api-surface.test.js tests/config.test.js
+
+      - name: CommonJS entry smoke test
+        run: node -e "const db2=require('./dist/cjs/index.js'); if(typeof db2.Db2Connection!=='function'||typeof db2.Db2Pool!=='function'||('CodePoint' in db2)) process.exit(1);"
+
+      - name: ESM entry smoke test
+        run: npm run test:esm
+
+  ci-gate:
+    name: CI gate
+    if: always()
+    needs:
+      - offline
+      - platform-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all CI lanes
+        env:
+          OFFLINE_RESULT: ${{ needs.offline.result }}
+          PLATFORM_RESULT: ${{ needs.platform-smoke.result }}
+        run: |
+          test "$OFFLINE_RESULT" = "success"
+          test "$PLATFORM_RESULT" = "success"
+          echo "All required CI lanes passed"

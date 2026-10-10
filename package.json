@@ -1,0 +1,74 @@
+{
+  "name": "@justybase/db2",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "description": "Managed Node.js DRDA driver for IBM Db2 LUW with TypeScript types",
+  "license": "MIT",
+  "author": "Krzysztof Dusko",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/justybase/JustyBase.Db2.Node.git"
+  },
+  "homepage": "https://github.com/justybase/JustyBase.Db2.Node#readme",
+  "bugs": {
+    "url": "https://github.com/justybase/JustyBase.Db2.Node/issues"
+  },
+  "keywords": [
+    "db2",
+    "database",
+    "drda",
+    "typescript",
+    "nodejs"
+  ],
+  "type": "commonjs",
+  "main": "dist/cjs/index.js",
+  "types": "dist/cjs/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/cjs/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "default": "./dist/cjs/index.js"
+    },
+    "./compat": {
+      "types": "./dist/cjs/ibmDbCompat.d.ts",
+      "import": "./dist/esm/ibmDbCompat.js",
+      "require": "./dist/cjs/ibmDbCompat.js",
+      "default": "./dist/cjs/ibmDbCompat.js"
+    },
+    "./diagnostics": {
+      "types": "./dist/cjs/diagnostics.d.ts",
+      "import": "./dist/esm/diagnostics.js",
+      "require": "./dist/cjs/diagnostics.js",
+      "default": "./dist/cjs/diagnostics.js"
+    }
+  },
+  "files": [
+    "dist/cjs",
+    "dist/esm",
+    "README.md",
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json && node -e \"require('node:fs').writeFileSync('dist/esm/package.json', JSON.stringify({type:'module'}))\"",
+    "test": "npm run build && node --test tests/*.test.js",
+    "test:esm": "npm run build && node --input-type=module -e \"await import('./dist/esm/index.js'); console.log('esm entry ok')\"",
+    "test:live": "npm run build && node --test --test-concurrency=1 tests/live/*.test.js",
+    "test:live:adapter": "npm run build && node --test --test-concurrency=1 tests/live/justybase-adapter.test.js",
+    "test:integration:db2": "bash scripts/test-db2-integration.sh"
+  },
+  "devDependencies": {
+    "@babel/parser": "^8.0.7",
+    "@types/node": "^26.5.0",
+    "typescript": "^7.0.2"
+  }
+}
