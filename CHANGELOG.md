@@ -22,6 +22,13 @@ public repository.
 - CI adds Windows/macOS package-entry smoke coverage and an aggregate `CI gate`.
 - TLS test certificates and private keys are generated at runtime instead of
   being stored in the repository.
+- DECFLOAT decoding now distinguishes signaling NaN (`sNaN`, `0x7e..`) from
+  quiet NaN (`NaN`, `0x7c..`) and the encoder accepts an `sNaN` input, matching
+  Db2's own `CAST('sNaN' AS DECFLOAT)` text rendering. Previously both folded to
+  `NaN`.
+- CI adds a blocking `parity-ibmdb` lane that runs a differential SELECT/type
+  corpus against a pinned, test-only `node-ibm_db@4.0.1` oracle on a fresh Db2
+  12.1.5 container (`./scripts/test-db2-integration.sh --parity`).
 
 ## [0.1.0-alpha.1] - unreleased
 

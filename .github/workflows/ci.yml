@@ -101,13 +101,48 @@ jobs:
     needs:
       - offline
       - platform-smoke
+      - parity-ibmdb
     runs-on: ubuntu-latest
     steps:
       - name: Require all CI lanes
         env:
           OFFLINE_RESULT: ${{ needs.offline.result }}
           PLATFORM_RESULT: ${{ needs.platform-smoke.result }}
+          PARITY_RESULT: ${{ needs.parity-ibmdb.result }}
         run: |
           test "$OFFLINE_RESULT" = "success"
           test "$PLATFORM_RESULT" = "success"
+          test "$PARITY_RESULT" = "success"
           echo "All required CI lanes passed"
+
+  parity-ibmdb:
+    name: ibm_db SELECT/type parity (Node 22, fresh Db2 12.1.5)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # Test-only oracle: node-ibm_db (+ IBM clidriver download) is installed
+      # with --no-save inside test-db2-integration.sh --parity, so it never
+      # enters package.json, the lockfile, SBOM or the published tarball.
+      # The driver under test still has no IBM runtime dependency.
+      - name: Run differential parity against pinned node-ibm_db
+        run: ./scripts/test-db2-integration.sh --parity
+
+      - name: Upload parity report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: parity-report
+          path: parity-report.json
+          if-no-files-found: warn

@@ -5,6 +5,7 @@ coverage/
 .env.*
 sbom-out/
 release-out/
+parity-report.json
 
 # Generated test credentials / certificates. Never commit private key material.
 tests/fixtures/tls/

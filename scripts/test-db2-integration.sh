@@ -5,11 +5,14 @@
 # SQL, runs the live integration tests against THAT container only, and removes
 # the container (and its volumes) afterwards, also on failure or Ctrl-C.
 #
-# Usage: scripts/test-db2-integration.sh [--full]
+# Usage: scripts/test-db2-integration.sh [--full] [--parity]
 #   (default)  small smoke suite: connect, DML/types/NULLs, parameters,
 #              transactions, result shape, error propagation
 #   --full     every existing live test of this repository that needs only the
 #              one database started here (takes several minutes)
+#   --parity   smoke suite plus differential SELECT/type parity against the
+#              official node-ibm_db provider (test-only oracle, never packaged;
+#              installs pinned ibm_db with --no-save and sets DB2_PARITY_IBMDB=1)
 #
 # Environment overrides (all optional):
 #   DB2_IT_IMAGE          Db2 image (default below; must not be a floating tag)
@@ -51,6 +54,7 @@ SUITE="smoke"
 for arg in "$@"; do
   case "$arg" in
     --full) SUITE="full" ;;
+    --parity) SUITE="parity" ;;
     -h|--help) sed -n '2,/^set -Eeuo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) printf '[db2-it] FAIL: unknown argument: %s (see --help)\n' "$arg" >&2; exit 2 ;;
   esac
@@ -237,8 +241,18 @@ log "Running integration tests ($SUITE suite)..."
 cd "$REPO_ROOT"
 [ -d node_modules ] || { log "Installing locked dependencies (npm ci --ignore-scripts)..."; npm ci --ignore-scripts; }
 npm run build
+# Pinned test-only oracle for differential parity. Installed with --no-save so it
+# never enters package.json, package-lock.json, SBOM or the published tarball;
+# the driver itself never requires IBM binaries at runtime.
+IBMDB_PIN="ibm_db@4.0.1"
 if [ "$SUITE" = "full" ]; then
   node --test --test-concurrency=1 tests/live/*.test.js
+elif [ "$SUITE" = "parity" ]; then
+  log "Installing test-only oracle $IBMDB_PIN (--no-save, not packaged)..."
+  npm install --no-save "$IBMDB_PIN"
+  export DB2_PARITY_IBMDB=1
+  export DB2_PARITY_REPORT="$REPO_ROOT/parity-report.json"
+  node --test --test-concurrency=1 tests/live/smoke.test.js tests/live/parity-ibmdb.test.js
 else
   node --test --test-concurrency=1 tests/live/smoke.test.js
 fi

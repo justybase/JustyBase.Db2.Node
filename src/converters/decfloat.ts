@@ -18,8 +18,12 @@ export function decodeDecfloat(data: Uint8Array): string {
   const coefficient = word & coefficientMask;
 
   if (combination >= 0x1e) {
-    if ((combination & 1) !== 0) return "NaN";
-    return sign ? "-Infinity" : "Infinity";
+    if (combination === 0x1e) return sign ? "-Infinity" : "Infinity";
+    // IEEE 754-2008 decimal specials: combination 0x1e is Infinity, 0x1f is NaN.
+    // For NaN, the bit immediately following the combination field is the
+    // signaling flag (1 = sNaN, 0 = quiet NaN), matching Db2's text rendering.
+    const signaling = (word >> BigInt(totalBits - 7)) & 1n;
+    return signaling !== 0n ? "sNaN" : "NaN";
   }
 
   const biasedExponent = combination >= 0x18
@@ -50,7 +54,8 @@ export function encodeDecfloat(value: unknown, byteLength: number): Uint8Array {
   if (text.startsWith("-")) { negative = true; text = text.slice(1); }
   else if (text.startsWith("+")) text = text.slice(1);
   if (/^infinity$|^inf$/iu.test(text)) return encodeSpecial(byteLength, 0x1e, negative);
-  if (/^nan$/iu.test(text)) return encodeSpecial(byteLength, 0x1f, false);
+  if (/^nan$/iu.test(text)) return encodeSpecial(byteLength, 0x1f, false, false);
+  if (/^snan$/iu.test(text)) return encodeSpecial(byteLength, 0x1f, false, true);
 
   const parts = text.match(/^((?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE]([+-]?\d+))?$/u);
   if (!parts) throw new Error(`invalid decimal floating-point value ${JSON.stringify(value)}`);
@@ -94,9 +99,12 @@ export function encodeDecfloat(value: unknown, byteLength: number): Uint8Array {
   return toFixedBytes(word, byteLength);
 }
 
-function encodeSpecial(byteLength: number, combination: number, negative: boolean): Uint8Array {
+function encodeSpecial(byteLength: number, combination: number, negative: boolean, signaling = false): Uint8Array {
   const totalBits = byteLength * 8;
   let word = BigInt(combination) << BigInt(totalBits - 6);
+  // Signaling NaNs set the bit immediately after the combination field (0x7e00..),
+  // quiet NaNs leave it clear (0x7c00..), Infinity (0x1e) ignores it.
+  if (signaling) word |= 1n << BigInt(totalBits - 7);
   if (negative) word |= 1n << BigInt(totalBits - 1);
   return toFixedBytes(word, byteLength);
 }

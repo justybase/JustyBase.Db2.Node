@@ -20,9 +20,12 @@ The repository contains release checks that contributors can reproduce directly 
 - npm tarball allowlist and exact-tarball consumer smoke tests,
 - SBOM generation,
 - Windows and macOS package-entry smoke coverage,
-- a full live Db2 LUW qualification run against a fresh, digest-pinned Db2 12.1.5 Community container via `./scripts/test-db2-integration.sh --full`.
+- a full live Db2 LUW qualification run against a fresh, digest-pinned Db2 12.1.5 Community container via `./scripts/test-db2-integration.sh --full`,
+- a blocking differential SELECT/type parity run against the official `node-ibm_db` provider via `./scripts/test-db2-integration.sh --parity` (CI `parity-ibmdb` lane).
 
 The public live qualification covers the repository's `tests/live/*.test.js` suite for the single fresh Db2 instance created by that script. It is intentionally self-contained: it does not consume developer `.env` files or an existing database.
+
+The `--parity` lane runs `tests/live/smoke.test.js` plus `tests/live/parity-ibmdb.test.js` against the same throwaway container. The oracle (`ibm_db@4.0.1`, installed with `npm install --no-save` inside the script) is test-only: it never enters `package.json`, the lockfile, the SBOM or the published tarball, and the driver itself keeps no IBM CLI/ODBC runtime dependency. Locally the parity file skips unless `DB2_PARITY_IBMDB=1` is set with `DB2_TEST_DSN` and an installed `ibm_db`; with the flag set a missing oracle fails closed. The lane covers SELECT value-shape parity only (scalars, NULLs, temporal/text/binary, boolean/integer input conversions, small LOBs); DML, procedures, cancellation, large streaming LOBs and soak remain maintainer-only gates below.
 
 ## Maintainer release qualification
 
