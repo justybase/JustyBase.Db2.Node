@@ -1,7 +1,6 @@
 {
   "name": "@justybase/db2",
   "version": "0.1.0-alpha.1",
-  "private": true,
   "description": "Managed Node.js DRDA driver for IBM Db2 LUW with TypeScript types",
   "license": "MIT",
   "author": "Krzysztof Dusko",

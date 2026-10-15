@@ -1,0 +1,101 @@
+name: Publish to npm
+
+# Manual only. Builds, tests, packs and validates the exact tarball, then publishes it
+# under a non-default dist-tag so a prerelease never becomes `latest`.
+# Needs the repository secret NPM_TOKEN. Run it first with dry_run=true.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: npm dist-tag for this release (a prerelease must not use latest)
+        required: true
+        default: alpha
+      dry_run:
+        description: Run every step except the registry upload
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build, verify and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+          registry-url: https://registry.npmjs.org
+
+      - name: Verify OpenSSL for TLS tests
+        run: openssl version
+
+      - name: Refuse a prerelease on the latest tag
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "Version: $VERSION, dist-tag: $TAG"
+          if [[ "$VERSION" == *-* && "$TAG" == "latest" ]]; then
+            echo "A prerelease version must not be published under the latest tag." >&2
+            exit 1
+          fi
+          if [[ "$(node -p "require('./package.json').private === true")" == "true" ]]; then
+            echo "package.json is still private." >&2
+            exit 1
+          fi
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build
+
+      - name: Check API surface
+        run: node tools/api/generate-ts-surface.cjs --check
+
+      - name: Offline unit and protocol tests
+        run: node --test tests/*.test.js
+
+      - name: ESM entry smoke test
+        run: npm run test:esm
+
+      - name: Pack once
+        shell: bash
+        run: |
+          rm -rf release-out && mkdir release-out
+          npm pack --pack-destination release-out --json > "${{ runner.temp }}/npm-pack.json"
+          PACKAGE_FILE="$(node -e "const fs=require('node:fs'); const x=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); process.stdout.write(x[0].filename)" "${{ runner.temp }}/npm-pack.json")"
+          test -f "release-out/$PACKAGE_FILE"
+          echo "PACKAGE_TGZ=release-out/$PACKAGE_FILE" >> "$GITHUB_ENV"
+
+      - name: Validate exact npm tarball
+        run: node tools/sbom/check-package-contents.cjs "$PACKAGE_TGZ"
+
+      - name: Consumer smoke against exact tarball
+        run: node tools/package/consumer-smoke.cjs "$PACKAGE_TGZ"
+
+      - name: Publish the validated tarball
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        shell: bash
+        run: |
+          ARGS=(--tag "$TAG" --access public --provenance)
+          if [[ "$DRY_RUN" == "true" ]]; then ARGS+=(--dry-run); fi
+          npm publish "$PACKAGE_TGZ" "${ARGS[@]}"
