@@ -16,8 +16,9 @@ const boundedProcedureOptions = { timeoutMs: 15_000, cancelCleanupTimeoutMs: 5_0
 // Optional independent oracle. The harness that qualifies several drivers together
 // (db2-conformance) supplies it: DB2_IBM_IMPORT_ORACLE names an executable that accepts
 // `--verify-ts-import <table>...` and prints one JSON line with the rows the official IBM
-// provider reads back. When it is not set, only the IBM cross-check is skipped (the
-// marker below is printed so a qualification run can refuse that); every driver-side
+// provider reads back. When it is not set, only the IBM cross-check is reported as
+// skipped via t.skip() with the reason below; gating lanes reject that skip unless it is
+// explicitly allowed (tools/ci/check-junit-no-skips.cjs); every driver-side
 // assertion still runs. This driver never depends on any other driver repository.
 const ibmImportOracle = process.env.DB2_IBM_IMPORT_ORACLE;
 const IBM_ORACLE_SKIPPED_MARKER = 'IBM import oracle verification skipped: DB2_IBM_IMPORT_ORACLE is not set';
@@ -1113,7 +1114,7 @@ test('live Db2 row importer flushes row/byte boundaries, partial tails, and an o
   }
 });
 
-test('live Db2 row importer transfers progressive and materialized BLOB/CLOB/DBCLOB/XML under both policies', { skip: !dsn, timeout: 60_000 }, async () => {
+test('live Db2 row importer transfers progressive and materialized BLOB/CLOB/DBCLOB/XML under both policies', { skip: !dsn, timeout: 60_000 }, async (t) => {
   const source = await Db2Connection.connect(dsn);
   const destination = await Db2Connection.connect(dsn);
   const suffix = randomUUID().replaceAll('-', '').toUpperCase().slice(0, 18);
@@ -1176,7 +1177,7 @@ test('live Db2 row importer transfers progressive and materialized BLOB/CLOB/DBC
       ];
       assert.deepEqual(ibmRows[atomicTable], expectedIbmRows, 'IBM provider independently reads Atomic imported values');
       assert.deepEqual(ibmRows[checkpointTable], expectedIbmRows, 'IBM provider independently reads CommitEveryRows imported values');
-    } else console.log(IBM_ORACLE_SKIPPED_MARKER);
+    } else t.skip(IBM_ORACLE_SKIPPED_MARKER);
   } finally {
     await source.close();
     for (const table of created.reverse()) await dropFixtureTable(destination, table);
@@ -1252,7 +1253,7 @@ test('live Db2 row importer cancellation rolls back the destination and discards
   }
 });
 
-test('live Db2 import cancellation during a progressive LOB preserves an earlier CommitEveryRows checkpoint', { skip: !dsn, timeout: 90_000 }, async () => {
+test('live Db2 import cancellation during a progressive LOB preserves an earlier CommitEveryRows checkpoint', { skip: !dsn, timeout: 90_000 }, async (t) => {
   const source = await Db2Connection.connect(dsn);
   const destination = await Db2Connection.connect(dsn);
   const sendSourceInterrupt = source.requestInterrupt.bind(source);
@@ -1330,7 +1331,7 @@ test('live Db2 import cancellation during a progressive LOB preserves an earlier
     if (ibmImportOracle) {
       const ibmRows = readTablesThroughOfficialIbmProvider([targetTable]);
       assert.deepEqual(ibmRows[targetTable], [[1, '010203ff', 'checkpoint clob', 'checkpoint dbclob', '<root>checkpoint</root>']], 'IBM .NET independently reads the exact durable checkpoint values');
-    } else console.log(IBM_ORACLE_SKIPPED_MARKER);
+    } else t.skip(IBM_ORACLE_SKIPPED_MARKER);
   } finally {
     await source.close();
     if (targetCreated) await dropFixtureTable(destination, targetTable);

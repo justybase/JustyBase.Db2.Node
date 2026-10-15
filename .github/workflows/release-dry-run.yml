@@ -71,3 +71,36 @@ jobs:
           name: JustyBase.Db2.Node-release-dry-run
           path: release-out/
           if-no-files-found: error
+
+  live-smoke:
+    name: Live Db2 smoke before release (no publish)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run live Db2 smoke against a fresh container
+        env:
+          DB2_IT_REPORT_DIR: ${{ runner.temp }}/db2-it-reports
+        run: ./scripts/test-db2-integration.sh
+
+      - name: Upload live smoke junit report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-live-smoke-junit
+          path: ${{ runner.temp }}/db2-it-reports/
+          if-no-files-found: warn

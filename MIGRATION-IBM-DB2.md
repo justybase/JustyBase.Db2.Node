@@ -50,11 +50,33 @@ try {
 
 Duplicate or empty column labels are disambiguated in object rows and name accessors (`ID`, `ID__1`, ...; empty labels become `COLUMN<n>`), so no value is silently overwritten. `getColumnMetadata()` keeps the original server labels in `SQL_DESC_NAME`. `getName()`/`getValue()` use the suffixed keys consistently.
 
-Failures from the facade reject with the driver's typed errors and additionally expose IBM-spelled `SQLCODE`/`SQLSTATE` aliases next to the native `sqlCode`/`sqlState`.
+Failures from the facade reject with the driver's typed errors and additionally expose IBM-spelled `SQLCODE`/`SQLSTATE` aliases and the node-ibm_db lower-case `sqlcode`/`sqlstate` properties, next to the native `sqlCode`/`sqlState`. A server error message uses the node-ibm_db token shape, for example `[JustyBase][DB2] SQL0204N  DB2INST1.MISSING is an undefined name.  SQLSTATE=42704`, so code that matches `SQLnnnnN` or `SQLSTATE=` in the message keeps working. The native API keeps its `DB2 SQLCODE=... SQLSTATE=...` messages unchanged.
+
+Note that `sqlstate` carries the native Db2 SQLSTATE. node-ibm_db reports an ODBC-mapped value for some errors; for a missing table it reports `42S02` where Db2 reports `42704`.
 
 `queryResult()` also exposes `getColumnMetadataSync()` and `getColumnNamesSync()` aliases. They are synchronous because the metadata has already been received before the cursor is returned. It additionally implements JustyBase's reader-shaped `fieldCount`, `read()`, `getName()`, `getTypeName()`, `getValue()`, `nextResult()`, and `close()` methods; row operations remain asynchronous. `nextResult()` returns `false` because multiple result sets are exposed through the native procedure API rather than this compatibility cursor. Procedure cursors expose terminal `outputParameters` after `finish()`.
 
 For consumers shaped around JustyBase's `createCommand()`, use `database.createCommand(sql, params)`. Its `executeReader()` returns the same reader adapter, and DML populates `_recordsAffected`; `execute()` drains row-returning commands and completes non-row commands. `commandTimeout` is expressed in seconds to match JustyBase's `DatabaseCommand` contract and is translated to the driver's millisecond deadline. `cancel()` aborts the command's `AbortSignal`. This adapter does not implement a mutable parameter collection or synchronous `executeSql`.
+
+## Column metadata and value shapes
+
+`getColumnMetadata()` returns `index` (1-based), `SQL_DESC_NAME`, `SQL_DESC_TYPE_NAME`, `SQL_DESC_CONSIZE_TYPE` (ODBC type code), `SQL_DESC_DISPLAY_SIZE`, `SQL_DESC_PRECISION`, `SQL_DESC_SCALE`, and `SQL_DESC_LENGTH`. Except for the precision, the values were checked field by field against node-ibm_db 4.0.1 on Db2 LUW 12.1.5 for SMALLINT, INTEGER, BIGINT, DOUBLE, REAL, DECIMAL, CHAR, VARCHAR, DATE, TIME, TIMESTAMP (scale 0 and 6), BLOB, CLOB and BINARY columns. Binary types report the declared length in `SQL_DESC_LENGTH`; other types report the display size.
+
+`SQL_DESC_PRECISION` reports the declared precision. node-ibm_db reports 0 for every probed column; the facade deliberately does not copy that.
+
+Binary values (BLOB, BINARY, VARBINARY) are Node.js `Buffer`s from both `query()` and the cursor, as in node-ibm_db.
+
+Deliberate differences from node-ibm_db, where the facade keeps the more exact or more accurate value:
+
+- DECIMAL values are strings, which keeps every digit; node-ibm_db returns a JavaScript number, which is an IEEE-754 double. Pass `{ decimal: "number" }` as the second argument of `open()` to get numbers.
+- BIGINT values are JavaScript `bigint`; node-ibm_db returns a string. `JSON.stringify` rejects a `bigint`, so pass `{ bigint: "string" }` to `open()` when results are serialized.
+- `sqlstate` carries the native Db2 SQLSTATE (`42704` for a missing table). node-ibm_db reports the ODBC-mapped value (`42S02`).
+- VARBINARY reports `VARBINARY` in `SQL_DESC_TYPE_NAME`; node-ibm_db reports a `VARCHAR () FOR BIT DATA` name.
+- Metadata for an unknown column type reports `SQL_DESC_CONSIZE_TYPE` 0.
+
+```ts
+const db = await open(dsn, { decimal: "number", bigint: "string" });
+```
 
 ## Mapping common `ibm_db` calls
 

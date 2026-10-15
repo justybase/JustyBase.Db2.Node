@@ -11,8 +11,23 @@ public repository.
 
 ## [Unreleased]
 
+### Added
+
+- Skip gate `tools/ci/check-junit-no-skips.cjs`: every live and offline lane writes a junit report and fails on skipped tests without an allowed reason, or when no test ran.
+- Live coverage for session context switches (`setCurrentSchema`, `changeDatabase` to a second database, fail-closed database switch, `switchUser` rejection) in `tests/live/session-context.test.js`.
+- Live TLS checks (`tests/live/tls.test.js`) against an ephemeral-CA listener provisioned by `--full`: verified connection, hostname mismatch and unknown CA are rejected.
+- `--soak` suite of `scripts/test-db2-integration.sh`: seeds its fixtures (`benchmarks/resource-soak-seed.cjs`) and runs the TypeScript resource soak for 15 minutes by default, failing on FD, socket, spool or 512 MiB RSS problems.
+- `npm run typecheck` type-checks the tooling and the tests that are already clean (`tsconfig.checkjs.json`, a ratchet list); `npm run test:coverage` prints the offline coverage report, also produced in CI.
+- Release dry-run runs a live Db2 smoke suite against a fresh container before packing; the manual qualification workflow adds a 15-minute soak job.
+- `DB2_IT_KEEP_CONTAINER=1` keeps the integration container for diagnosis; `DB2_IT_REPORT_DIR` receives the junit report and the soak log.
+
 ### Changed
 
+- The `ibm_db` compatibility facade (`@justybase/db2/compat`) matches node-ibm_db more closely: `getColumnMetadata()` adds `index` and `SQL_DESC_DISPLAY_SIZE`, reports ODBC type codes in `SQL_DESC_CONSIZE_TYPE` and `REAL`/`DOUBLE` names, and follows node-ibm_db for `SQL_DESC_LENGTH`; server errors from the facade use the `SQL0204N` message token and expose lower-case `sqlcode`/`sqlstate`; inline BLOB values are `Buffer`s. `SQL_DESC_PRECISION` reports the declared precision. `open(dsn, { decimal: "number", bigint: "string" })` opts into node-ibm_db's value shapes; the defaults stay exact (DECIMAL string, BIGINT `bigint`). Native API messages are unchanged. The deliberate differences are listed in `MIGRATION-IBM-DB2.md`.
+- Tests that cannot run no longer pass silently: the SECMEC 9 profile, the ibm_db parity oracle and the IBM import oracle are reported as skipped with their reason.
+- Kerberos/GSSAPI is documented as caller-supplied token only; keytab and credential-cache settings are rejected by a regression test.
+- `scripts/test-db2-integration.sh` raises the test database's `LOGSECOND` to 512 (online, recorded before and after in `db-log-config.txt`), following the C# qualification, so a long atomic import cannot exhaust the 22-file default log. The driver is unchanged: SQL-964/57011 is still reported. On failure the script prints only the db2diag lines that name ADM1823E or SQL-964.
+- `scripts/test-db2-integration.sh` starts a fresh container (up to three attempts) when Db2 never becomes ready, and abandons an attempt at once when setup reports completion but the database is missing, and checks readiness without a `docker logs | grep -q` pipeline that can misreport under `pipefail`. Test failures are never retried.
 - Public package identity prepared as `@justybase/db2` with final repository
   metadata targeting `justybase/JustyBase.Db2.Node`.
 - Root package exports now focus on the supported application API; the

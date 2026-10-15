@@ -9,9 +9,10 @@
 //   appear in package.json dependencies, dist/, or the published tarball. CI installs
 //   it in an isolated step with `npm install --no-save ibm_db@<pinned>`.
 // - Without DB2_TEST_DSN every test is skipped, like the rest of tests/live.
-// - Without DB2_PARITY_IBMDB=1 the suite skips with a marker so local runs without
-//   the IBM stack stay green. With DB2_PARITY_IBMDB=1 a missing `ibm_db` fails
-//   closed so CI cannot silently pass without the oracle.
+// - Without DB2_PARITY_IBMDB=1 the test is reported as skipped (node --test skip
+//   with a reason). Gating lanes run tools/ci/check-junit-no-skips.cjs, which rejects
+//   any skip not explicitly allowed. With DB2_PARITY_IBMDB=1 a missing `ibm_db`
+//   fails closed.
 // - Secret values are never logged; DSN passwords are redacted from failures.
 require('../load-env.cjs');
 const test = require('node:test');
@@ -281,16 +282,12 @@ async function lobRoundTrip(t, item, ts, ibm, report) {
   }
 }
 
-test('parity ibm_db: SELECT/type corpus matches ts-db2', { skip: !dsn, timeout: 180_000 }, async (t) => {
+// Opt-in by flag: without DB2_PARITY_IBMDB=1 the test is reported as skipped (never
+// as passed). With the flag set, a missing oracle makes loadIbmDb() throw.
+const parityOptIn = dsn && !parityEnabled ? IBMDB_SKIPPED_MARKER : false;
+
+test('parity ibm_db: SELECT/type corpus matches ts-db2', { skip: dsn ? parityOptIn : 'DB2_TEST_DSN is not set', timeout: 180_000 }, async (t) => {
   const ibmDb = loadIbmDb();
-  if (!ibmDb) {
-    console.log(IBMDB_SKIPPED_MARKER);
-    return;
-  }
-  if (!parityEnabled) {
-    console.log(IBMDB_SKIPPED_MARKER);
-    return;
-  }
 
   const config = parseDsn(dsn);
   const ts = await Db2Connection.connect(dsn);

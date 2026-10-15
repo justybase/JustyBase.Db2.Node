@@ -44,8 +44,27 @@ jobs:
       - name: Check API surface
         run: node tools/api/generate-ts-surface.cjs --check
 
-      - name: Offline unit and protocol tests
-        run: node --test tests/*.test.js
+      - name: Type-check tooling and the tests that are already clean
+        run: npm run typecheck
+
+      - name: Offline unit and protocol tests (with coverage report)
+        run: >-
+          node --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout
+          --test-reporter=junit --test-reporter-destination="${{ runner.temp }}/offline.junit.xml"
+          tests/*.test.js
+
+      - name: Reject unexpected skipped tests
+        run: >-
+          node tools/ci/check-junit-no-skips.cjs "${{ runner.temp }}/offline.junit.xml"
+          --allow-skip 'DB2_SECMEC9_TEST_DSN is not set'
+
+      - name: Upload offline junit report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: offline-junit
+          path: ${{ runner.temp }}/offline.junit.xml
+          if-no-files-found: warn
 
       - name: ESM entry smoke test
         run: npm run test:esm
@@ -137,6 +156,8 @@ jobs:
       # enters package.json, the lockfile, SBOM or the published tarball.
       # The driver under test still has no IBM runtime dependency.
       - name: Run differential parity against pinned node-ibm_db
+        env:
+          DB2_IT_REPORT_DIR: ${{ runner.temp }}/db2-it-reports
         run: ./scripts/test-db2-integration.sh --parity
 
       - name: Upload parity report
@@ -145,4 +166,12 @@ jobs:
         with:
           name: parity-report
           path: parity-report.json
+          if-no-files-found: warn
+
+      - name: Upload Db2 junit reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: db2-parity-junit
+          path: ${{ runner.temp }}/db2-it-reports/
           if-no-files-found: warn

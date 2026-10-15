@@ -110,3 +110,15 @@ test('mechanism 11 without a token file is rejected before opening a socket', as
     return true;
   });
 });
+
+test('mechanism 11 with only a keytab or credential cache is rejected: ticket synthesis is not supported', async () => {
+  // The driver never obtains tickets itself. A caller-supplied GSSAPI token is the only
+  // supported input, so keytab or ccache settings alone must fail before any socket opens.
+  for (const overrides of [{ krb5KeytabFile: '/nonexistent/krb5.keytab' }, { krb5CcacheFile: '/nonexistent/krb5cc' }]) {
+    await assert.rejects(Db2Connection.connect(mockConfig(1, overrides)), (error) => {
+      assert.equal(error.name, 'Db2ConfigurationError');
+      assert.match(error.message, /ticket synthesis is not supported/);
+      return true;
+    });
+  }
+});

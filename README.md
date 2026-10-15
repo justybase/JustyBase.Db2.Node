@@ -40,7 +40,7 @@ The current alpha includes direct/prepared SQL, transactions, bounded pooling, s
 | TLS 1.2 / 1.3 | ✅ | Certificate/hostname validation |
 | Password authentication | ✅ | DRDA server authentication |
 | SECMEC 9 | ✅ | Encrypted user/password exchange |
-| Kerberos / GSSAPI path | 🧪 | Environment-dependent |
+| Kerberos / GSSAPI path | 🧪 | Caller-supplied GSSAPI token only (`gssapi_token_file`); keytab and credential-cache settings are rejected because the driver does not acquire tickets; not verified against a KDC in this repository |
 | Direct SQL | ✅ | `query` / `execute` |
 | Prepared statements | ✅ | Reusable positional parameters |
 | Transactions | ✅ | Async transaction handle |
@@ -262,7 +262,7 @@ CI also validates the public TypeScript surface, generates an SBOM and checks np
 - Maintained compatibility testing targets Db2 LUW, not Db2 for z/OS or IBM i.
 - Some inline/EXTDTA LOB forms are materialized rather than progressively streamed.
 - Procedure-cursor progressive LOBs are handled more conservatively than ordinary query-stream locators.
-- Trusted-context switching and Kerberos/GSSAPI require environment/server configuration.
+- Trusted-context switching requires server configuration and privileges. Kerberos/GSSAPI accepts only a caller-supplied token (`gssapi_token_file`); keytab and credential-cache settings are rejected rather than silently ignored.
 
 ## License and provenance
 

@@ -61,6 +61,8 @@
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json && node -e \"require('node:fs').writeFileSync('dist/esm/package.json', JSON.stringify({type:'module'}))\"",
     "test": "npm run build && node --test tests/*.test.js",
+    "test:coverage": "npm run build && node --test --experimental-test-coverage tests/*.test.js",
+    "typecheck": "tsc -p tsconfig.checkjs.json",
     "test:esm": "npm run build && node --input-type=module -e \"await import('./dist/esm/index.js'); console.log('esm entry ok')\"",
     "test:live": "npm run build && node --test --test-concurrency=1 tests/live/*.test.js",
     "test:live:adapter": "npm run build && node --test --test-concurrency=1 tests/live/justybase-adapter.test.js",

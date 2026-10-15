@@ -1,0 +1,26 @@
+{
+  // Type-checks the JavaScript tooling and the tests that are already clean.
+  // The list is a ratchet: add a test file here once `npm run typecheck` passes for it.
+  // The rest of tests/ is plain JavaScript and is not type-checked yet.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "node16",
+    "moduleResolution": "node16",
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "types": ["node"]
+  },
+  "files": [
+    "tools/ci/check-junit-no-skips.cjs",
+    "tools/sbom/generate-ts-sbom.cjs",
+    "tools/sbom/check-package-contents.cjs",
+    "tools/package/consumer-smoke.cjs",
+    "tests/load-env.cjs",
+    "tests/secmec9-live.test.js",
+    "tests/live/session-context.test.js",
+    "tests/live/tls.test.js"
+  ]
+}

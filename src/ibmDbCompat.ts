@@ -1,19 +1,29 @@
 import { EventEmitter } from "node:events";
 import { applyParam, newConfig, normalizeCurrentSchema, parseDsn, type Config } from "./config.js";
-import { Db2Error } from "./errors.js";
+import { Db2Error, Db2ServerError } from "./errors.js";
 import { DSS_LIMITS } from "./network/dss.js";
 import { Db2Connection, Db2ProcedureReader, isDb2LobStream, type Db2Parameter, type QueryOptions, type QueryStreamRow } from "./network/session.js";
 import type { ColumnDescription } from "./network/ddm.js";
-import { baseSqlType, sqlTypeName } from "./types/sqltype.js";
+import { baseSqlType, sqlTypeName, SqlType } from "./types/sqltype.js";
 
-/** Metadata names also exposed by node-ibm_db's ODBCResult. */
+/** Metadata names exposed by node-ibm_db's ODBCResult.getColumnMetadata() (verified against node-ibm_db 4.0.1 on Db2 LUW 12.1.5). */
 export type Db2CompatColumnMetadata = ColumnDescription & {
+  /** 1-based position of the column in the result. */
+  readonly index: number;
   readonly SQL_DESC_NAME: string;
   readonly SQL_DESC_TYPE_NAME: string;
+  /** ODBC SQL type code (for example 4 for INTEGER, 12 for VARCHAR). */
   readonly SQL_DESC_CONSIZE_TYPE: number;
+  readonly SQL_DESC_DISPLAY_SIZE: number;
   readonly SQL_DESC_PRECISION: number;
   readonly SQL_DESC_SCALE: number;
   readonly SQL_DESC_LENGTH: number;
+};
+/** Opt-in value shapes for code migrating from node-ibm_db. Defaults keep exact values:
+ * DECIMAL as a string and BIGINT as a bigint. node-ibm_db returns a number and a string. */
+export type Db2CompatValueOptions = {
+  readonly decimal?: "string" | "number";
+  readonly bigint?: "bigint" | "string";
 };
 export type Db2CompatExecutionResult = {
   columns: ColumnDescription[];
@@ -47,6 +57,7 @@ export class Db2CompatResult {
     private readonly initialColumns: readonly ColumnDescription[],
     private readonly procedure?: Db2ProcedureReader,
     private readonly onProcedureFinished?: (rowsAffected: number) => void,
+    private readonly valueOptions?: Db2CompatValueOptions,
   ) {
     if (procedure) this.procedureRows = procedure.rows();
   }
@@ -63,15 +74,23 @@ export class Db2CompatResult {
   }
 
   getColumnMetadata(): Db2CompatColumnMetadata[] {
-    return this.columns.map((column) => ({
-      ...column,
-      SQL_DESC_NAME: column.name,
-      SQL_DESC_TYPE_NAME: sqlTypeName(baseSqlType(column.sqlType)),
-      SQL_DESC_CONSIZE_TYPE: safeLength(column.length),
-      SQL_DESC_PRECISION: column.precision,
-      SQL_DESC_SCALE: column.scale,
-      SQL_DESC_LENGTH: safeLength(column.length),
-    }));
+    return this.columns.map((column, index) => {
+      const typeName = ibmTypeName(column);
+      const displaySize = ibmDisplaySize(typeName, column);
+      return {
+        ...column,
+        index: index + 1,
+        SQL_DESC_NAME: column.name,
+        SQL_DESC_TYPE_NAME: typeName,
+        SQL_DESC_CONSIZE_TYPE: odbcTypeCode(typeName),
+        SQL_DESC_DISPLAY_SIZE: displaySize,
+        // node-ibm_db reports 0 here for every probed column type; this facade reports the declared precision.
+        SQL_DESC_PRECISION: column.precision,
+        SQL_DESC_SCALE: column.scale,
+        // Binary and LOB types report the declared length; other types report the display size.
+        SQL_DESC_LENGTH: LENGTH_IS_DECLARED.has(typeName) ? safeLength(column.length) : displaySize,
+      };
+    });
   }
 
   getColumnNames(): string[] { return this.columnKeys; }
@@ -81,6 +100,10 @@ export class Db2CompatResult {
   getColumnNamesSync(): string[] { return this.getColumnNames(); }
 
   async fetch(): Promise<Record<string, unknown> | null> {
+    return withCompatErrors(() => this.fetchRow());
+  }
+
+  private async fetchRow(): Promise<Record<string, unknown> | null> {
     if (this.closed) return null;
     if (this.procedure) {
       const result = await this.procedureRows!.next();
@@ -88,7 +111,7 @@ export class Db2CompatResult {
         this.currentRow = undefined;
         return null;
       }
-      this.currentRow = valuesObject(this.columns, await materializeRowValues(result.value));
+      this.currentRow = valuesObject(this.columns, await materializeRowValues(result.value), this.valueOptions);
       return this.currentRow;
     }
 
@@ -98,7 +121,7 @@ export class Db2CompatResult {
       this.currentRow = undefined;
       return null;
     }
-    this.currentRow = valuesObject(result.value.columns, await materializeRowValues(result.value.values));
+    this.currentRow = valuesObject(result.value.columns, await materializeRowValues(result.value.values), this.valueOptions);
     return this.currentRow;
   }
 
@@ -167,17 +190,17 @@ export class Db2CompatResult {
  * It intentionally does not emulate synchronous ibm_db methods.
  */
 export class Db2CompatDatabase {
-  private constructor(readonly connection: Db2Connection) {}
+  private constructor(readonly connection: Db2Connection, readonly valueOptions?: Db2CompatValueOptions) {}
 
-  static async open(input: string | Config): Promise<Db2CompatDatabase> {
-    return new Db2CompatDatabase(await Db2Connection.connect(input));
+  static async open(input: string | Config, valueOptions?: Db2CompatValueOptions): Promise<Db2CompatDatabase> {
+    return new Db2CompatDatabase(await Db2Connection.connect(input), valueOptions);
   }
 
   /** Like ibm_db Database.query(): materializes rows as objects keyed by column name. */
   async query(sql: string, params?: readonly unknown[], options: QueryOptions = {}): Promise<Record<string, unknown>[]> {
     return withCompatErrors(async () => {
       const result = await this.connection.query(sql, params, options);
-      return result.rows.map((values) => valuesObject(result.columns, values));
+      return result.rows.map((values) => valuesObject(result.columns, values, this.valueOptions));
     });
   }
 
@@ -188,7 +211,7 @@ export class Db2CompatDatabase {
         const result = await this.connection.query(sql, params, options);
         return {
           columns: result.columns,
-          rows: result.rows.map((values) => valuesObject(result.columns, values)),
+          rows: result.rows.map((values) => valuesObject(result.columns, values, this.valueOptions)),
           recordsAffected: -1,
         };
       }
@@ -214,7 +237,7 @@ export class Db2CompatDatabase {
       const rows = params === undefined
         ? this.connection.queryStream(sql, options)
         : this.connection.queryStreamWithParams(sql, params, options);
-      return new Db2CompatResult(rows, columns);
+      return new Db2CompatResult(rows, columns, undefined, undefined, this.valueOptions);
     });
   }
 
@@ -228,7 +251,7 @@ export class Db2CompatDatabase {
       const parameters: Db2Parameter[] = params.map((value) => ({ value, direction: "input" }));
       const procedure = await this.connection.executeProcedureStream(sql, parameters, options);
       async function* emptyRows(): AsyncGenerator<QueryStreamRow> {}
-      return new Db2CompatResult(emptyRows(), procedure.columns, procedure, onFinished);
+      return new Db2CompatResult(emptyRows(), procedure.columns, procedure, onFinished, this.valueOptions);
     });
   }
 
@@ -363,8 +386,8 @@ export class Db2DatabaseConnection extends EventEmitter {
 }
 
 /** Opens a native TypeScript DRDA connection with the Promise shape of ibm_db.open. */
-export async function open(input: string | Config): Promise<Db2CompatDatabase> {
-  return Db2CompatDatabase.open(typeof input === "string" ? parseDsn(input) : input);
+export async function open(input: string | Config, valueOptions?: Db2CompatValueOptions): Promise<Db2CompatDatabase> {
+  return Db2CompatDatabase.open(typeof input === "string" ? parseDsn(input) : input, valueOptions);
 }
 
 function toNativeConfig(input: Db2DatabaseConnectionConfig): Config {
@@ -416,13 +439,28 @@ async function materializeLobValue(value: unknown): Promise<unknown> {
   return text;
 }
 
-function valuesObject(columns: readonly ColumnDescription[], values: readonly unknown[]): Record<string, unknown> {
+function valuesObject(columns: readonly ColumnDescription[], values: readonly unknown[], options?: Db2CompatValueOptions): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   const keys = suffixedColumnKeys(columns);
   for (let index = 0; index < columns.length; index++) {
-    result[keys[index]!] = values[index];
+    result[keys[index]!] = ibmCompatValue(values[index], columns[index]!, options);
   }
   return result;
+}
+
+/** node-ibm_db returns binary values as Buffer; inline BLOB values arrive as a plain Uint8Array. */
+function ibmCompatValue(value: unknown, column: ColumnDescription, options?: Db2CompatValueOptions): unknown {
+  if (value instanceof Uint8Array && !Buffer.isBuffer(value)) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  }
+  const base = baseSqlType(column.sqlType);
+  if (options?.decimal === "number" && typeof value === "string" && (base === SqlType.Decimal || base === SqlType.Numeric)) {
+    return Number(value);
+  }
+  if (options?.bigint === "string" && typeof value === "bigint" && base === SqlType.BigInt) {
+    return value.toString();
+  }
+  return value;
 }
 
 /** Object-row keys with duplicate/empty labels disambiguated (`ID`, `ID__1`, ...).
@@ -437,23 +475,88 @@ function suffixedColumnKeys(columns: readonly ColumnDescription[]): string[] {
   });
 }
 
-/** Rejects with the driver's typed error, exposing IBM-spelled SQLCODE/SQLSTATE
- * aliases next to the native sqlCode/sqlState for migrating consumers. */
+/** Rejects with the driver's typed error. For migrating consumers it also exposes the
+ * IBM-spelled SQLCODE/SQLSTATE aliases and node-ibm_db's lower-case sqlcode/sqlstate
+ * properties, and it rewrites a server error message to carry the SQLnnnnN token that
+ * node-ibm_db messages contain. */
 async function withCompatErrors<T>(operation: () => Promise<T>): Promise<T> {
   try {
     return await operation();
   } catch (error) {
     if (error instanceof Db2Error) {
-      const compat = error as Db2Error & { SQLCODE?: number | undefined; SQLSTATE?: string | undefined };
+      const compat = error as Db2Error & {
+        SQLCODE?: number | undefined;
+        SQLSTATE?: string | undefined;
+        sqlcode?: number | undefined;
+        sqlstate?: string | undefined;
+      };
       compat.SQLCODE ??= error.sqlCode;
       compat.SQLSTATE ??= error.sqlState;
+      compat.sqlcode ??= error.sqlCode;
+      compat.sqlstate ??= error.sqlState;
+      if (error instanceof Db2ServerError) rewriteServerMessage(error);
     }
     throw error;
   }
 }
 
+/** Replaces the driver's "DB2 SQLCODE=... SQLSTATE=..." prefix with the node-ibm_db shape
+ * "[JustyBase][DB2] SQL0204N  <server text>  SQLSTATE=42704". Only the first rewrite applies. */
+function rewriteServerMessage(error: Db2ServerError): void {
+  const original = error.message;
+  if (!original.startsWith("DB2 SQLCODE=") || error.sqlCode === undefined) return;
+  const serverText = original.replace(/^DB2 SQLCODE=-?\d+(?: SQLSTATE=[A-Z0-9]{5})?\s*/u, "").trim();
+  const token = `SQL${String(Math.abs(error.sqlCode)).padStart(4, "0")}${error.sqlCode < 0 ? "N" : "W"}`;
+  const state = error.sqlState ? `  SQLSTATE=${error.sqlState}` : "";
+  const message = `[JustyBase][DB2] ${token}  ${serverText}${state}`.trimEnd();
+  error.message = message;
+  if (error.stack) error.stack = error.stack.replace(original, message);
+}
+
 function safeLength(length: bigint): number {
   return Number(length > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : length);
+}
+
+/** Column type name as node-ibm_db reports it. Db2 FLOAT is REAL for a 4-byte column, DOUBLE otherwise. */
+function ibmTypeName(column: ColumnDescription): string {
+  const base = baseSqlType(column.sqlType);
+  if (base === SqlType.Float) return column.length === 4n ? "REAL" : "DOUBLE";
+  return sqlTypeName(base);
+}
+
+/** ODBC SQL type codes, which node-ibm_db reports in SQL_DESC_CONSIZE_TYPE. Unlisted types report 0. */
+const ODBC_TYPE_CODES: ReadonlyMap<string, number> = new Map([
+  ["SMALLINT", 5], ["INTEGER", 4], ["BIGINT", -5], ["REAL", 7], ["DOUBLE", 8], ["DECIMAL", 3],
+  ["CHAR", 1], ["VARCHAR", 12], ["BINARY", -2], ["VARBINARY", -3],
+  ["DATE", 91], ["TIME", 92], ["TIMESTAMP", 93], ["BLOB", -98], ["CLOB", -99],
+]);
+
+function odbcTypeCode(typeName: string): number {
+  return ODBC_TYPE_CODES.get(typeName) ?? 0;
+}
+
+/** Types whose SQL_DESC_LENGTH is the declared length rather than the display size. */
+const LENGTH_IS_DECLARED: ReadonlySet<string> = new Set(["BINARY", "VARBINARY", "BLOB"]);
+
+/** ODBC display size: fixed widths for numeric and temporal types, the declared length for
+ * character types, and twice the declared length for binary types. */
+function ibmDisplaySize(typeName: string, column: ColumnDescription): number {
+  const length = safeLength(column.length);
+  switch (typeName) {
+    case "SMALLINT": return 6;
+    case "INTEGER": return 11;
+    case "BIGINT": return 20;
+    case "REAL": return 13;
+    case "DOUBLE": return 22;
+    case "DECIMAL": return column.precision + 2;
+    case "DATE": return 10;
+    case "TIME": return 8;
+    case "TIMESTAMP": return column.scale > 0 ? 19 + column.scale + 1 : 19;
+    case "BINARY":
+    case "VARBINARY":
+    case "BLOB": return length * 2;
+    default: return length;
+  }
 }
 
 function stripLeadingSqlComments(sql: string): string {

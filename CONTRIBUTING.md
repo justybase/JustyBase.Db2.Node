@@ -39,7 +39,7 @@ Live Db2 qualification is separate:
 npm run test:integration:db2 -- --full
 ```
 
-This starts its own pinned ephemeral Db2 Community container and does not use a developer `.env` or an existing database.
+This starts its own pinned ephemeral Db2 Community container and does not use a developer `.env` or an existing database. Every run writes a junit report and rejects skipped tests that lack an allowed reason. Set `DB2_IT_KEEP_CONTAINER=1` to keep the container after a run for diagnosis, and `DB2_IT_REPORT_DIR` to receive the junit report.
 
 ## Public API changes
 
@@ -54,6 +54,10 @@ Do not add low-level DRDA/DDM protocol helpers to the root package. Experimental
 Prefer deterministic offline protocol/resource tests for boundaries, malformed replies, cancellation ordering and lifecycle behavior. Use live Db2 tests where behavior genuinely depends on server interaction.
 
 Do not weaken, skip or delete a failing test merely to make CI pass.
+
+## Diagnostics
+
+`TS_DB2_TRACE_PROCEDURE_CURSOR=1` writes procedure result-set protocol traces to stderr (code points, payload lengths, column types). The trace logs protocol metadata only: code points, lengths, counts and column types, never credentials or SQL text. At a block boundary it can show the first unparsed byte of row data, so keep it off when working with production data. It is a developer aid, not part of the public API.
 
 ## Performance and memory
 
