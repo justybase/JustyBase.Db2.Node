@@ -98,4 +98,5 @@ jobs:
         run: |
           ARGS=(--tag "$TAG" --access public --provenance)
           if [[ "$DRY_RUN" == "true" ]]; then ARGS+=(--dry-run); fi
-          npm publish "$PACKAGE_TGZ" "${ARGS[@]}"
+          # The ./ prefix keeps npm from reading owner/repo-shaped paths as a GitHub shorthand.
+          npm publish "./$PACKAGE_TGZ" "${ARGS[@]}"
