@@ -65,18 +65,18 @@ Maintainer qualification currently targets Db2 LUW 12.1.5 over TCP and Db2 LUW 1
 
 ## Installation
 
-The package is **not published to npm yet** and intentionally remains `private: true` during public-release preparation.
+The current alpha is published to npm as `@justybase/db2@0.1.0-alpha.1` under the `alpha` dist-tag:
+
+```bash
+npm install @justybase/db2@alpha
+```
+
+Release artifacts are built and published by the manual GitHub Actions workflow `publish.yml`, which attaches a provenance attestation. You can check it with `npm audit signatures`.
 
 For development, install from a local checkout:
 
 ```bash
 npm install ../JustyBase.Db2.Node
-```
-
-After the first public npm release the package will install as:
-
-```bash
-npm install @justybase/db2
 ```
 
 Both module systems are supported: `require("@justybase/db2")` resolves to the CommonJS entry point and `import ... from "@justybase/db2"` resolves to native ESM.

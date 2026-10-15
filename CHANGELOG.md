@@ -4,10 +4,9 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/) and this
 project uses [Semantic Versioning](https://semver.org/).
 
-Version policy: the current development version is `0.1.0-alpha.1`.
-The npm package is not published yet. Public package publication remains a
-separate, explicit release decision after final qualification in the clean
-public repository.
+Version policy: the current version is `0.1.0-alpha.1`, published to npm as
+`@justybase/db2` under the `alpha` dist-tag. Each publication is an explicit
+release decision made through the manual publish workflow.
 
 ## [Unreleased]
 
@@ -45,7 +44,7 @@ public repository.
   corpus against a pinned, test-only `node-ibm_db@4.0.1` oracle on a fresh Db2
   12.1.5 container (`./scripts/test-db2-integration.sh --parity`).
 
-## [0.1.0-alpha.1] - unreleased
+## [0.1.0-alpha.1] - 2026-10-15
 
 ### Added
 
