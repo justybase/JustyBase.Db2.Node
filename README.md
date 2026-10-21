@@ -68,7 +68,7 @@ Maintainer qualification currently targets Db2 LUW 12.1.5 over TCP and Db2 LUW 1
 
 ## Installation
 
-The current alpha is published to npm as `@justybase/db2@0.1.0-alpha.1` under the `alpha` dist-tag:
+The current alpha is published to npm as `@justybase/db2@0.1.0-alpha.2` under the `alpha` dist-tag:
 
 ```bash
 npm install @justybase/db2@alpha
