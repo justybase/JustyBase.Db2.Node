@@ -255,3 +255,90 @@ test('SECMEC 7 authentication failure does not retry with plaintext mechanism 3'
   await assert.rejects(Db2Connection.connect(mockConfig(mock.port, 7)), /authentication failed \(SECCHKCD=15\)/i);
   await mock.done();
 });
+
+// No configured mechanism (securityMechanism 0): the driver requests 3 and, when a
+// SERVER_ENCRYPT server refuses it, sends a second ACCSEC on the same connection
+// with the strongest encrypting mechanism the server listed. Verified live on
+// Db2 LUW 11.5.4.0 and 12.1.5.0.
+for (const [listed, expected] of [[[7, 9, 10], 9], [[7, 10], 7]]) {
+  test(`unset security mechanism follows a server that accepts ${listed.join(', ')} to SECMEC ${expected}`, async (t) => {
+    const mock = await mockServer(t, async (socket, reader) => {
+      const opening = await readChain(reader);
+      assert.deepEqual(opening.map((packet) => packet.codePoint), [CodePoint.EXCSAT, CodePoint.ACCSEC]);
+      assert.equal(uint16(ddm.parseDdmParameters(opening[1].payload).get(CodePoint.SECMEC)), 3);
+      await reply(socket, CodePoint.ACCSECRD, new Uint8Array([
+        ...uint16List(CodePoint.SECMEC, listed),
+        ...ddm.packBytes(CodePoint.SECCHKCD, Uint8Array.of(1)),
+        ...uint16List(CodePoint.ENCALG, [1, 2]),
+      ]));
+
+      const retry = await readChain(reader);
+      assert.deepEqual(retry.map((packet) => packet.codePoint), [CodePoint.ACCSEC], 'the retry is a lone ACCSEC, not a new EXCSAT or a SECCHK');
+      const request = ddm.parseDdmParameters(retry[0].payload);
+      assert.equal(uint16(request.get(CodePoint.SECMEC)), expected);
+      const clientPublic = Buffer.from(request.get(CodePoint.SECTKN));
+      assert.equal(clientPublic.length, 32);
+      await reply(socket, CodePoint.ACCSECRD, new Uint8Array([
+        ...ddm.packUint16(CodePoint.SECMEC, expected),
+        ...ddm.packBytes(CodePoint.SECTKN, SERVER_PUBLIC),
+        ...ddm.packUint16(CodePoint.ENCALG, 1),
+      ]));
+
+      const authentication = await readChain(reader);
+      assert.deepEqual(authentication.map((packet) => packet.codePoint), [CodePoint.SECCHK, CodePoint.ACCRDB]);
+      const payload = Buffer.from(authentication[0].payload);
+      assert.equal(payload.includes(Buffer.from(encodeCp500('clear-password'))), false, 'the plaintext password must not appear in SECCHK');
+      const secchk = ddm.parseDdmParameters(authentication[0].payload);
+      assert.equal(uint16(secchk.get(CodePoint.SECMEC)), expected);
+      assert.equal(secchk.has(CodePoint.PASSWORD), false);
+      assert.equal(secchk.has(CodePoint.USRID), expected === 7, 'only SECMEC 7 sends a clear user ID');
+
+      await reply(socket, CodePoint.SECCHKRM, ddm.packBytes(CodePoint.SECCHKCD, Uint8Array.of(0)), true);
+      await reply(socket, CodePoint.ACCRDBRM, ddm.packBytes(CodePoint.RDBINTTKN, Uint8Array.of(4, 28, 167, 50)));
+      await readChain(reader);
+      await reply(socket, CodePoint.SQLCARD, sqlCard());
+    });
+
+    const connection = await Db2Connection.connect(mockConfig(mock.port, 0));
+    assert.equal(connection.isClosed, false);
+    await connection.close();
+    await mock.done();
+  });
+}
+
+test('unset security mechanism does not follow a server that lists no encrypting mechanism', async (t) => {
+  const mock = await mockServer(t, async (socket, reader) => {
+    await readChain(reader);
+    await reply(socket, CodePoint.ACCSECRD, new Uint8Array([
+      ...uint16List(CodePoint.SECMEC, [10, 11]),
+      ...ddm.packBytes(CodePoint.SECCHKCD, Uint8Array.of(1)),
+    ]));
+    await assertNoFurtherRequest(reader, 'no second ACCSEC and no SECCHK');
+  });
+
+  await assert.rejects(Db2Connection.connect(mockConfig(mock.port, 0)), /rejected security mechanism 3 \(SECCHKCD=1\); the server accepts 10, 11/);
+  await mock.done();
+});
+
+test('unset security mechanism stops when the server rejects the mechanism it listed', async (t) => {
+  const mock = await mockServer(t, async (socket, reader) => {
+    await readChain(reader);
+    await reply(socket, CodePoint.ACCSECRD, new Uint8Array([
+      ...uint16List(CodePoint.SECMEC, [7, 9]),
+      ...ddm.packBytes(CodePoint.SECCHKCD, Uint8Array.of(1)),
+    ]));
+    await readChain(reader);
+    await reply(socket, CodePoint.ACCSECRD, new Uint8Array([
+      ...uint16List(CodePoint.SECMEC, [3]),
+      ...ddm.packBytes(CodePoint.SECCHKCD, Uint8Array.of(1)),
+    ]));
+    await assertNoFurtherRequest(reader, 'no third ACCSEC and no SECCHK');
+  });
+
+  await assert.rejects(Db2Connection.connect(mockConfig(mock.port, 0)), (error) => {
+    assert.ok(error instanceof Db2UnsupportedFeatureError);
+    assert.match(error.message, /listed security mechanism 9 as accepted but then rejected it/);
+    return true;
+  });
+  await mock.done();
+});

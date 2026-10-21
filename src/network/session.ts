@@ -440,6 +440,8 @@ export class Db2Connection {
   private baseSessionUser: string | undefined;
   private preparedSql: string | undefined;
   private rdbInterruptToken: Uint8Array | undefined;
+  /** Mechanism the server accepted in ACCSECRD; 0 until the handshake completes. */
+  private negotiatedSecurityMechanism = 0;
   private operationActive = false;
   private interruptSuppressionDepth = 0;
   private interruptPending: Promise<boolean> | undefined;
@@ -1401,45 +1403,73 @@ export class Db2Connection {
     return this.closePromise;
   }
 
-  private async handshake(): Promise<void> {
-    this.correlationId = 1;
-    const mechanism = this.securityMechanism;
+  /**
+   * Sends one ACCSEC and reads ACCSECRD. ACCSECRD echoes the requested SECMEC
+   * on success. On rejection it carries the list of mechanisms the server
+   * accepts (one SECMEC parameter holding several 2-byte values), SECCHKCD and,
+   * for encrypting servers, the ENCALG list -- but no SECTKN, so the client
+   * cannot switch mechanisms in SECCHK; it has to send a new ACCSEC.
+   */
+  private async accessSecurity(mechanism: number, retry: boolean): Promise<{
+    rejectedBy?: { mechanisms: number[]; checkCode: number };
+    securityToken: Uint8Array; encryptionAlgorithms: number[] | undefined; clientPrivateKey: bigint | undefined;
+  }> {
     let clientPrivateKey: bigint | undefined;
     let accsecToken: Uint8Array = new Uint8Array();
-    let gssapiToken: Uint8Array = new Uint8Array();
     if (mechanism === 7 || mechanism === 9) {
       clientPrivateKey = generateSecmec9PrivateKey();
       accsecToken = secmec9PublicKey(clientPrivateKey);
-    } else if (mechanism === 11) {
-      gssapiToken = new Uint8Array(await readFile(this.config.gssapiTokenFile));
     }
-    await this.send(packExcsat("ts-db2", hostname() || "ts-db2-client", "SQL12010", "ts-db2"), false, false);
     await this.send(packAccsec(this.database, mechanism, accsecToken, mechanism === 7 ? 1 : undefined), false, true);
-    const negotiation = await this.readReplyChain();
-    // ACCSECRD echoes the requested SECMEC on success. On rejection it carries
-    // the list of mechanisms the server accepts (one SECMEC parameter holding
-    // several 2-byte values), SECCHKCD and, for encrypting servers, the ENCALG
-    // list -- but no SECTKN, so the client cannot switch mechanisms in SECCHK.
     let serverMechanisms: number[] = [mechanism];
-    let accsecCheckCode = 0;
+    let checkCode = 0;
     let securityToken: Uint8Array = new Uint8Array();
     let encryptionAlgorithms: number[] | undefined;
-    for (const reply of negotiation) {
+    for (const reply of await this.readReplyChain()) {
       if (reply.codePoint === CodePoint.RDBNFNRM) throw new Db2DatabaseNotFoundError();
       if (reply.codePoint === CodePoint.ACCSECRD) {
         const fields = parseDdmParameters(reply.payload);
         const mechanisms = fields.get(CodePoint.SECMEC);
         if (mechanisms) serverMechanisms = parseUint16List(mechanisms, "security mechanism");
-        accsecCheckCode = fields.get(CodePoint.SECCHKCD)?.[0] ?? accsecCheckCode;
+        checkCode = fields.get(CodePoint.SECCHKCD)?.[0] ?? checkCode;
         securityToken = fields.get(CodePoint.SECTKN) ?? securityToken;
         const algorithms = fields.get(CodePoint.ENCALG);
         if (algorithms) encryptionAlgorithms = parseUint16List(algorithms, "encryption algorithm");
       }
     }
     if (serverMechanisms.length !== 1 || serverMechanisms[0] !== mechanism) {
-      throw new Db2UnsupportedFeatureError(`DB2 rejected security mechanism ${mechanism}${accsecCheckCode ? ` (SECCHKCD=${accsecCheckCode})` : ""}; the server accepts ${serverMechanisms.join(", ")}. Set security_mechanism explicitly; mechanism changes are not negotiated automatically`);
+      // A server that rejects the mechanism we switched to is not trusted for another round.
+      if (retry) throw new Db2UnsupportedFeatureError(`DB2 listed security mechanism ${mechanism} as accepted but then rejected it (server accepts ${serverMechanisms.join(", ")})`);
+      return { rejectedBy: { mechanisms: serverMechanisms, checkCode }, securityToken, encryptionAlgorithms, clientPrivateKey };
     }
-    if (accsecCheckCode !== 0) throw new Db2AuthenticationError(`DB2 rejected the security exchange (SECCHKCD=${accsecCheckCode})`, accsecCheckCode);
+    if (checkCode !== 0) throw new Db2AuthenticationError(`DB2 rejected the security exchange (SECCHKCD=${checkCode})`, checkCode);
+    return { securityToken, encryptionAlgorithms, clientPrivateKey };
+  }
+
+  private async handshake(): Promise<void> {
+    this.correlationId = 1;
+    let mechanism = this.securityMechanism;
+    const gssapiToken = mechanism === 11 ? new Uint8Array(await readFile(this.config.gssapiTokenFile)) : new Uint8Array();
+    await this.send(packExcsat("ts-db2", hostname() || "ts-db2-client", "SQL12010", "ts-db2"), false, false);
+    let exchange = await this.accessSecurity(mechanism, false);
+    if (exchange.rejectedBy && this.config.securityMechanism === 0) {
+      // No mechanism was configured: like IBM CLI, follow a server that refuses
+      // the plaintext default, but only to an encrypting mechanism it listed
+      // (9, else 7). No credentials have been sent yet, and Db2 accepts a new
+      // ACCSEC on the same connection after rejecting one.
+      const upgrade = [9, 7].find((candidate) => exchange.rejectedBy?.mechanisms.includes(candidate));
+      if (upgrade !== undefined) {
+        mechanism = upgrade;
+        this.correlationId = 1;
+        exchange = await this.accessSecurity(mechanism, true);
+      }
+    }
+    if (exchange.rejectedBy) {
+      const { mechanisms, checkCode } = exchange.rejectedBy;
+      throw new Db2UnsupportedFeatureError(`DB2 rejected security mechanism ${mechanism}${checkCode ? ` (SECCHKCD=${checkCode})` : ""}; the server accepts ${mechanisms.join(", ")}. Set security_mechanism to one of them (7 or 9 for AUTHENTICATION=SERVER_ENCRYPT)`);
+    }
+    this.negotiatedSecurityMechanism = mechanism;
+    const { securityToken, encryptionAlgorithms, clientPrivateKey } = exchange;
     const negotiated = mechanism;
 
     if (negotiated === 3) {
@@ -1567,8 +1597,8 @@ export class Db2Connection {
     }
     // DRDA re-authentication fallback, mirroring go-db2: a standalone SECCHK
     // revalidates the new identity on the existing connection context.
-    if (this.securityMechanism !== 3) {
-      throw new Db2UnsupportedFeatureError(`DB2 user switch fallback requires security mechanism 3; current mechanism ${this.securityMechanism} is not supported for mid-session re-authentication`);
+    if (this.negotiatedSecurityMechanism !== 3) {
+      throw new Db2UnsupportedFeatureError(`DB2 user switch fallback requires security mechanism 3; current mechanism ${this.negotiatedSecurityMechanism} is not supported for mid-session re-authentication`);
     }
     this.correlationId = 1;
     const passwordBytes = password === undefined ? new Uint8Array() : utf8EncoderShared.encode(password);

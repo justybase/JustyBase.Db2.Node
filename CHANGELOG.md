@@ -4,11 +4,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/) and this
 project uses [Semantic Versioning](https://semver.org/).
 
-Version policy: the current version is `0.1.0-alpha.2`, published to npm as
+Version policy: the current version is `0.1.0-alpha.3`, published to npm as
 `@justybase/db2` under the `alpha` dist-tag. Each publication is an explicit
 release decision made through the manual publish workflow.
 
 ## [Unreleased]
+
+## [0.1.0-alpha.3] - 2026-10-21
+
+### Changed
+
+- A connection without a configured `security_mechanism` now follows a server that refuses the plaintext default: when `ACCSECRD` lists `9` or `7` (Db2 `AUTHENTICATION=SERVER_ENCRYPT`), the driver sends a second `ACCSEC` on the same connection with `9`, else `7`, before any credentials are sent. Previously such connections failed with `DB2 rejected security mechanism 3 ... the server accepts 7, 9, 10`. An explicitly configured mechanism, including `3`, is still never changed. Verified live on Db2 LUW 11.5.4.0 and 12.1.5.0.
+- The mid-session `switchUser` SECCHK fallback checks the mechanism actually negotiated, so it stays refused after an automatic switch to an encrypting mechanism.
 
 ## [0.1.0-alpha.2] - 2026-10-21
 

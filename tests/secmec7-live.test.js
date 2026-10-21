@@ -36,6 +36,18 @@ test('SECMEC 7 live profile rejects plaintext SECMEC 3 without a mechanism switc
   });
 });
 
+test('SECMEC 7 live profile: an unset security mechanism connects through an encrypting mechanism', { skip: SECMEC7_DSN ? false : SECMEC7_SKIP }, async () => {
+  const url = new URL(String(SECMEC7_DSN));
+  url.searchParams.delete('security_mechanism');
+  url.searchParams.delete('secmec');
+  const db = await Db2Connection.connect(url.toString());
+  try {
+    assert.deepEqual((await db.query('VALUES 44')).rows, [[44]]);
+  } finally {
+    await db.close();
+  }
+});
+
 test('SECMEC 7 live profile reports a wrong password as an authentication failure', { skip: SECMEC7_DSN ? false : SECMEC7_SKIP }, async () => {
   const url = new URL(String(SECMEC7_DSN));
   url.password = `${decodeURIComponent(url.password)}-wrong`;

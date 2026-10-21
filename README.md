@@ -56,7 +56,7 @@ The current alpha includes direct/prepared SQL, transactions, bounded pooling, s
 | `ibm_db` migration facade | 🧪 | `@justybase/db2/compat` |
 | IBM CLI dependency | ❌ | Not required at runtime |
 
-Use `security_mechanism=7` (also `secmec=7`, `usrencpwd` or `encrypted_password_security`) to request DRDA `USRENCPWD` against a server with `AUTHENTICATION=SERVER_ENCRYPT`. The default remains mechanism 3, and `Authentication=SERVER_ENCRYPT` continues to request mechanism 9. The driver never switches mechanisms on its own: if the server rejects the requested mechanism, the connection fails with the list of mechanisms the server accepts. Mechanism 7 uses DES (`ENCALG=1`); a server selecting AES (`ENCALG=2`) is rejected before any credentials are sent. DRDA password encryption uses an unauthenticated Diffie–Hellman exchange, so use TLS when the network is not trusted.
+Use `security_mechanism=7` (also `secmec=7`, `usrencpwd` or `encrypted_password_security`) to request DRDA `USRENCPWD` against a server with `AUTHENTICATION=SERVER_ENCRYPT`. The default remains mechanism 3, and `Authentication=SERVER_ENCRYPT` continues to request mechanism 9. When `security_mechanism` is not set, the driver requests mechanism 3 and, if the server refuses it and lists an encrypting mechanism, retries the key exchange with 9 (or 7) on the same connection, as IBM CLI does; no credentials are sent before that. An explicitly configured mechanism is never changed: if the server rejects it, the connection fails with the list of mechanisms the server accepts. Mechanism 7 uses DES (`ENCALG=1`); a server selecting AES (`ENCALG=2`) is rejected before any credentials are sent. DRDA password encryption uses an unauthenticated Diffie–Hellman exchange, so use TLS when the network is not trusted.
 
 ## Requirements
 
@@ -68,7 +68,7 @@ Maintainer qualification currently targets Db2 LUW 12.1.5 over TCP and Db2 LUW 1
 
 ## Installation
 
-The current alpha is published to npm as `@justybase/db2@0.1.0-alpha.2` under the `alpha` dist-tag:
+The current alpha is published to npm as `@justybase/db2@0.1.0-alpha.3` under the `alpha` dist-tag:
 
 ```bash
 npm install @justybase/db2@alpha
