@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { encodeCp500 } from "../converters/ebcdic.js";
 
 // DRDA EUSRIDPWD (security mechanism 9): Diffie-Hellman key agreement with a
 // 256-bit prime and DES-CBC password/userid encryption. The parameters match
@@ -86,6 +87,22 @@ export function encryptSecmec9(plaintext: Uint8Array, serverPublicKey: Uint8Arra
   if (peer.length < 20) throw new RangeError("DB2 EUSRIDPWD server security token is too short");
   const sessionKey = secmec9SessionKey(peer, privateKey);
   return desCbcEncrypt(sessionKey.subarray(12, 20), peer.subarray(12, 20), plaintext);
+}
+
+/**
+ * Encrypts the password field for DRDA USRENCPWD (SECMEC 7) with DES-CBC.
+ * Its DES key comes from the same DH shared secret as SECMEC 9, but its IV is
+ * the CP500 user ID padded with zero bytes or truncated to one DES block.
+ * SECMEC 9 instead encrypts both identity fields using an IV from the server
+ * public key; the two mechanisms are not wire-compatible.
+ */
+export function encryptSecmec7(plaintext: Uint8Array, user: string, serverPublicKey: Uint8Array, privateKey: bigint): Uint8Array {
+  const userId = encodeCp500(user);
+  if (userId.length === 0) throw new RangeError("DB2 USRENCPWD requires a non-empty user ID");
+  const iv = new Uint8Array(8);
+  iv.set(userId.subarray(0, 8));
+  const sharedSecret = secmec9SessionKey(serverPublicKey, privateKey);
+  return desCbcEncrypt(sharedSecret.subarray(12, 20), iv, plaintext);
 }
 
 /** Exposes the DES-CBC primitive so tests can mirror the server-side decryption. */

@@ -38,7 +38,8 @@ The current alpha includes direct/prepared SQL, transactions, bounded pooling, s
 | --- | :---: | --- |
 | TCP connections | ✅ | Native Node socket transport |
 | TLS 1.2 / 1.3 | ✅ | Certificate/hostname validation |
-| Password authentication | ✅ | DRDA server authentication |
+| Password authentication | ✅ | DRDA server authentication (SECMEC 3) |
+| SECMEC 7 | ✅ | Clear user ID and DES-encrypted password (`USRENCPWD`); verified on Db2 11.5.4 and 12.1.5; AES selection fails closed |
 | SECMEC 9 | ✅ | Encrypted user/password exchange |
 | Kerberos / GSSAPI path | 🧪 | Caller-supplied GSSAPI token only (`gssapi_token_file`); keytab and credential-cache settings are rejected because the driver does not acquire tickets; not verified against a KDC in this repository |
 | Direct SQL | ✅ | `query` / `execute` |
@@ -54,6 +55,8 @@ The current alpha includes direct/prepared SQL, transactions, bounded pooling, s
 | Row import | ✅ | Bounded prepared-insert pipeline |
 | `ibm_db` migration facade | 🧪 | `@justybase/db2/compat` |
 | IBM CLI dependency | ❌ | Not required at runtime |
+
+Use `security_mechanism=7` (also `secmec=7`, `usrencpwd` or `encrypted_password_security`) to request DRDA `USRENCPWD` against a server with `AUTHENTICATION=SERVER_ENCRYPT`. The default remains mechanism 3, and `Authentication=SERVER_ENCRYPT` continues to request mechanism 9. The driver never switches mechanisms on its own: if the server rejects the requested mechanism, the connection fails with the list of mechanisms the server accepts. Mechanism 7 uses DES (`ENCALG=1`); a server selecting AES (`ENCALG=2`) is rejected before any credentials are sent. DRDA password encryption uses an unauthenticated Diffie–Hellman exchange, so use TLS when the network is not trusted.
 
 ## Requirements
 

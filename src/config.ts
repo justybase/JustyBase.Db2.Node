@@ -228,19 +228,20 @@ function stripHostBrackets(hostname: string): string {
 function parseSecurityMechanism(value: string): number {
   switch (value.trim().toLowerCase()) {
     case "server": case "usridpwd": case "plaintext": case "secmec3": case "3": return 3;
+    case "usrencpwd": case "encrypted_password_security": case "secmec7": case "7": return 7;
     case "server_encrypt": case "eusridpwd": case "dh_encrypted_password": case "secmec9": case "9": return 9;
     case "kerberos": case "gssapi": case "gssplugin": case "secmec11": case "11": return 11;
     case "0": return 0;
     default: {
       const parsed = Number(value.trim());
-      if (Number.isInteger(parsed) && (parsed === 0 || parsed === 3 || parsed === 9 || parsed === 11)) return parsed;
+      if (Number.isInteger(parsed) && (parsed === 0 || parsed === 3 || parsed === 7 || parsed === 9 || parsed === 11)) return parsed;
       throw unsupportedAuthentication(value);
     }
   }
 }
 
 function unsupportedAuthentication(value: string): DsnError {
-  return new DsnError(`unsupported DB2 authentication mode '${value}'; this driver supports Authentication=SERVER (3), Authentication=SERVER_ENCRYPT / security_mechanism=9 (EUSRIDPWD), and security_mechanism=11 (Kerberos/GSSAPI with gssapi_token_file)`);
+  return new DsnError(`unsupported DB2 authentication mode '${value}'; this driver supports Authentication=SERVER (3), security_mechanism=7 (USRENCPWD), Authentication=SERVER_ENCRYPT / security_mechanism=9 (EUSRIDPWD), and security_mechanism=11 (Kerberos/GSSAPI with gssapi_token_file)`);
 }
 
 // Matches Go's time.ParseDuration forms plus a bare integer as seconds.

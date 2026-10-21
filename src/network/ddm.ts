@@ -123,8 +123,9 @@ export function packExcsatManagerLevels(levels: readonly ManagerLevel[]): Uint8A
   return packDdmObject(CodePoint.EXCSAT, packBytes(CodePoint.MGRLVLLS, packManagerLevels(levels)));
 }
 
-export function packAccsec(database: string, securityMechanism: number, securityToken: Uint8Array = new Uint8Array()): Uint8Array {
+export function packAccsec(database: string, securityMechanism: number, securityToken: Uint8Array = new Uint8Array(), encryptionAlgorithm?: number): Uint8Array {
   const params = [packUint16(CodePoint.SECMEC, securityMechanism), packString(CodePoint.RDBNAM, database, "cp500")];
+  if (encryptionAlgorithm !== undefined) params.push(packUint16(CodePoint.ENCALG, encryptionAlgorithm));
   if (securityToken.length) params.push(packBytes(CodePoint.SECTKN, securityToken));
   return packDdmObject(CodePoint.ACCSEC, concat(params));
 }
@@ -150,6 +151,22 @@ export function packSecchkEusridpwd(database: string, encryptedUserid: Uint8Arra
     packUint16(CodePoint.SECMEC, 9),
     packString(CodePoint.RDBNAM, database, "cp500"),
     packBytes(CodePoint.SECTKN, encryptedUserid),
+    packBytes(CodePoint.SECTKN, encryptedPassword),
+  ]));
+}
+
+/**
+ * Builds the USRENCPWD (SECMEC 7) SECCHK: cleartext USRID plus one SECTKN
+ * carrying the DES-CBC-encrypted password (Derby's layout). The client
+ * Diffie-Hellman public key already travelled in ACCSEC. Verified against
+ * Db2 LUW SERVER_ENCRYPT: an encrypted PASSWORD parameter instead of SECTKN
+ * is rejected with SECCHKCD=16, and an extra SECTKN with AGNPRMRM.
+ */
+export function packSecchkUsrencpwd(database: string, user: string, encryptedPassword: Uint8Array): Uint8Array {
+  return packDdmObject(CodePoint.SECCHK, concat([
+    packUint16(CodePoint.SECMEC, 7),
+    packString(CodePoint.RDBNAM, database, "cp500"),
+    packString(CodePoint.USRID, user, "cp500"),
     packBytes(CodePoint.SECTKN, encryptedPassword),
   ]));
 }

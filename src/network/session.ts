@@ -16,12 +16,12 @@ import {
   packCloseProcedureResultSet, packContinueProcedureResultSet, packContinueQuery, packDescribeSqlStatement, packExecSqlImmediate, packExecuteSqlStatement,
   packExecuteSqlSet, packExcsat, packExcsatManagerLevels, packOpenQuery,
   packExecuteSqlStatementForResultSets, packOpenQueryWithParams, packPrepareSqlStatement, packRollback, packSecchk, packSqlStatement,
-  packGetNextChunk, packInterruptRdbRequest, packSecchkEusridpwd, packSecchkKerberos,
+  packGetNextChunk, packInterruptRdbRequest, packSecchkEusridpwd, packSecchkKerberos, packSecchkUsrencpwd,
   findDdmObject, parseDdmParameters, parseProgressiveChunkReply, parseQueryDescriptor, parseResultSetSections, parseSqlCard, sqlCardWarning, parseSqlCursorInfo, parseSqlDard, parseSqlDtaReply, parseSqlResultSetCount,
 } from "./ddm.js";
 import { DSS_LIMITS, DssPacket, encodeRequestDss, readDss, writeExternalLobDss } from "./dss.js";
 import { Db2DssStream } from "./stream.js";
-import { encryptSecmec9, generateSecmec9PrivateKey, secmec9PublicKey } from "../security/secmec9.js";
+import { encryptSecmec7, encryptSecmec9, generateSecmec9PrivateKey, secmec9PublicKey } from "../security/secmec9.js";
 
 type Db2Socket = Socket;
 export type QueryResult = { columns: ColumnDescription[]; rows: unknown[][]; resultSets?: Db2ResultSet[] };
@@ -465,8 +465,8 @@ export class Db2Connection {
     if (!config.port) config.port = config.useSsl ? 50001 : 50000;
     if (!config.database.trim()) throw new Db2ConfigurationError("DB2 database name is required");
     if (!config.user) throw new Db2ConfigurationError("DB2 user name is required");
-    if (![0, 3, 9, 11].includes(config.securityMechanism))
-      throw new Db2ConfigurationError(`Unsupported DB2 authentication mechanism ${config.securityMechanism}; supported mechanisms are 3 (USRIDPWD), 9 (EUSRIDPWD), and 11 (Kerberos/GSSAPI)`);
+    if (![0, 3, 7, 9, 11].includes(config.securityMechanism))
+      throw new Db2ConfigurationError(`Unsupported DB2 authentication mechanism ${config.securityMechanism}; supported mechanisms are 3 (USRIDPWD), 7 (USRENCPWD), 9 (EUSRIDPWD), and 11 (Kerberos/GSSAPI)`);
     if (config.securityMechanism === 11 && !config.gssapiTokenFile)
       throw new Db2ConfigurationError("Security mechanism 11 (Kerberos/GSSAPI) requires gssapi_token_file with a caller-supplied GSSAPI token; krb5_keytab/krb5_ccache ticket synthesis is not supported");
     const timeout = config.timeoutMs > 0 ? config.timeoutMs : 30_000;
@@ -1407,29 +1407,40 @@ export class Db2Connection {
     let clientPrivateKey: bigint | undefined;
     let accsecToken: Uint8Array = new Uint8Array();
     let gssapiToken: Uint8Array = new Uint8Array();
-    if (mechanism === 9) {
+    if (mechanism === 7 || mechanism === 9) {
       clientPrivateKey = generateSecmec9PrivateKey();
       accsecToken = secmec9PublicKey(clientPrivateKey);
     } else if (mechanism === 11) {
       gssapiToken = new Uint8Array(await readFile(this.config.gssapiTokenFile));
     }
     await this.send(packExcsat("ts-db2", hostname() || "ts-db2-client", "SQL12010", "ts-db2"), false, false);
-    await this.send(packAccsec(this.database, mechanism, accsecToken), false, true);
+    await this.send(packAccsec(this.database, mechanism, accsecToken, mechanism === 7 ? 1 : undefined), false, true);
     const negotiation = await this.readReplyChain();
-    let negotiated = mechanism;
+    // ACCSECRD echoes the requested SECMEC on success. On rejection it carries
+    // the list of mechanisms the server accepts (one SECMEC parameter holding
+    // several 2-byte values), SECCHKCD and, for encrypting servers, the ENCALG
+    // list -- but no SECTKN, so the client cannot switch mechanisms in SECCHK.
+    let serverMechanisms: number[] = [mechanism];
+    let accsecCheckCode = 0;
     let securityToken: Uint8Array = new Uint8Array();
+    let encryptionAlgorithms: number[] | undefined;
     for (const reply of negotiation) {
       if (reply.codePoint === CodePoint.RDBNFNRM) throw new Db2DatabaseNotFoundError();
       if (reply.codePoint === CodePoint.ACCSECRD) {
         const fields = parseDdmParameters(reply.payload);
-        const negotiatedMechanism = fields.get(CodePoint.SECMEC);
-        if (negotiatedMechanism && negotiatedMechanism.length >= 2) negotiated = new DataView(negotiatedMechanism.buffer, negotiatedMechanism.byteOffset, 2).getUint16(0, false);
+        const mechanisms = fields.get(CodePoint.SECMEC);
+        if (mechanisms) serverMechanisms = parseUint16List(mechanisms, "security mechanism");
+        accsecCheckCode = fields.get(CodePoint.SECCHKCD)?.[0] ?? accsecCheckCode;
         securityToken = fields.get(CodePoint.SECTKN) ?? securityToken;
+        const algorithms = fields.get(CodePoint.ENCALG);
+        if (algorithms) encryptionAlgorithms = parseUint16List(algorithms, "encryption algorithm");
       }
     }
-    if (negotiated !== mechanism) {
-      throw new Db2UnsupportedFeatureError(`DB2 selected security mechanism ${negotiated}, but this connection requested ${mechanism}; mechanism changes are not allowed`);
+    if (serverMechanisms.length !== 1 || serverMechanisms[0] !== mechanism) {
+      throw new Db2UnsupportedFeatureError(`DB2 rejected security mechanism ${mechanism}${accsecCheckCode ? ` (SECCHKCD=${accsecCheckCode})` : ""}; the server accepts ${serverMechanisms.join(", ")}. Set security_mechanism explicitly; mechanism changes are not negotiated automatically`);
     }
+    if (accsecCheckCode !== 0) throw new Db2AuthenticationError(`DB2 rejected the security exchange (SECCHKCD=${accsecCheckCode})`, accsecCheckCode);
+    const negotiated = mechanism;
 
     if (negotiated === 3) {
       await this.send(packSecchk(3, securityToken, this.database, this.config.user, utf8EncoderShared.encode(this.config.password), false, "cp500"), false, false);
@@ -1439,6 +1450,20 @@ export class Db2Connection {
       const encryptedUserid = encryptSecmec9(encodeCp500(this.config.user), securityToken, clientPrivateKey);
       const encryptedPassword = encryptSecmec9(encodeCp500(this.config.password), securityToken, clientPrivateKey);
       await this.send(packSecchkEusridpwd(this.database, encryptedUserid, encryptedPassword), false, false);
+    } else if (negotiated === 7) {
+      if (!clientPrivateKey) throw new Db2UnsupportedFeatureError("DB2 USRENCPWD requires a client Diffie-Hellman key pair");
+      // ENCALG is absent on older servers (DES implied); Db2 LUW echoes ENCALG=1.
+      if (encryptionAlgorithms && (encryptionAlgorithms.length !== 1 || encryptionAlgorithms[0] !== 1)) {
+        throw new Db2UnsupportedFeatureError(`DB2 selected USRENCPWD encryption algorithm ENCALG=${encryptionAlgorithms.join(",")}; this driver supports DES (ENCALG=1) only`);
+      }
+      if (securityToken.length < 20) throw new Db2AuthenticationError("DB2 USRENCPWD key exchange did not return a usable server security token");
+      let encryptedPassword: Uint8Array;
+      try {
+        encryptedPassword = encryptSecmec7(encodeCp500(this.config.password), this.config.user, securityToken, clientPrivateKey);
+      } catch (error) {
+        throw new Db2AuthenticationError(`DB2 USRENCPWD key exchange failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      await this.send(packSecchkUsrencpwd(this.database, this.config.user, encryptedPassword), false, false);
     } else {
       await this.send(packSecchkKerberos(this.database, gssapiToken, this.config.user), false, false);
     }
@@ -3029,6 +3054,15 @@ function parseIdentityValue(value: unknown): bigint {
   const text = String(value ?? "").trim().split(".", 1)[0]!;
   if (!/^[+-]?\d+$/u.test(text)) throw new Error(`DB2 returned an invalid identity value: ${String(value)}`);
   return BigInt(text);
+}
+
+/** Decodes a DDM parameter holding one or more big-endian 2-byte values (SECMEC, ENCALG lists). */
+function parseUint16List(value: Uint8Array, name: string): number[] {
+  if (value.length === 0 || value.length % 2 !== 0) throw new Db2AuthenticationError(`DB2 returned a malformed ${name} list in ACCSECRD`);
+  const view = new DataView(value.buffer, value.byteOffset, value.byteLength);
+  const out: number[] = [];
+  for (let offset = 0; offset < value.length; offset += 2) out.push(view.getUint16(offset, false));
+  return out;
 }
 
 function sanitizeClientRegister(value: string): string { return value.replace(/[\0\r\n]/gu, ""); }

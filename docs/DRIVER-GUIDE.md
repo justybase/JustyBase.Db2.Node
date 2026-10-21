@@ -8,6 +8,17 @@ The driver accepts URL-style Db2 DSNs and a documented subset of IBM CLI-style k
 
 Use TLS for credentials in transit. Hostname/IP verification remains enabled when TLS is configured.
 
+Authentication is selected with `security_mechanism` (or `secmec`) in a URL query or key/value DSN:
+
+- `3` (`USRIDPWD`) is the unchanged default and sends the user ID and password without DRDA credential encryption.
+- `7` (`USRENCPWD`, also `usrencpwd` or `encrypted_password_security`) sends the user ID in clear text and encrypts only the password with DES. It needs a server with `AUTHENTICATION=SERVER_ENCRYPT`.
+- `9` (`EUSRIDPWD`) encrypts both user ID and password; `Authentication=SERVER_ENCRYPT` continues to select this mechanism.
+- `11` uses the caller-provided GSSAPI token.
+
+The driver never changes the requested mechanism. When the server rejects it, `ACCSECRD` lists the mechanisms it accepts (for example `7, 9, 10` on `SERVER_ENCRYPT`, `3, 5` on `SERVER`) and the connection fails with a `Db2UnsupportedFeatureError` naming them, before any `SECCHK` is sent. A failed encrypted authentication is never retried with mechanism 3.
+
+Mechanism 7 requests DES (`ENCALG=1`). A server selecting AES (`ENCALG=2`) or any other algorithm fails closed with a `Db2UnsupportedFeatureError` before credentials are sent. DRDA Diffie–Hellman credential encryption does not authenticate the peer and is vulnerable to man-in-the-middle attacks; use TLS on untrusted networks.
+
 ## Pooling
 
 `Db2Pool` bounds physical sessions and queued waiters. It supports acquire/connect deadlines, idle/lifetime controls and explicit shutdown.

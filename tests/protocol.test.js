@@ -273,6 +273,20 @@ test('DDM builders produce parseable EXCSAT, ACCSEC and PKGNAMCSN objects', () =
   assert.equal(decodeCp500(accsec.get(CodePoint.RDBNAM)), 'TESTDB');
   assert.deepEqual([...accsec.get(CodePoint.SECTKN)], [1, 2]);
 
+  const usrenpwdAccsec = ddm.parseDdmParameters(ddm.packAccsec('TESTDB', 7, Uint8Array.of(3, 4), 1).subarray(4));
+  assert.equal(new DataView(usrenpwdAccsec.get(CodePoint.SECMEC).buffer, usrenpwdAccsec.get(CodePoint.SECMEC).byteOffset, 2).getUint16(0), 7);
+  assert.equal(new DataView(usrenpwdAccsec.get(CodePoint.ENCALG).buffer, usrenpwdAccsec.get(CodePoint.ENCALG).byteOffset, 2).getUint16(0), 1);
+
+  const clearUser = 'db2inst1';
+  const ciphertext = Uint8Array.of(0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80);
+  const usrencpwd = ddm.parseDdmParameters(ddm.packSecchkUsrencpwd('TESTDB', clearUser, ciphertext).subarray(4));
+  assert.equal(new DataView(usrencpwd.get(CodePoint.SECMEC).buffer, usrencpwd.get(CodePoint.SECMEC).byteOffset, 2).getUint16(0), 7);
+  assert.equal(decodeCp500(usrencpwd.get(CodePoint.USRID)), clearUser);
+  // Db2 LUW requires the encrypted password in SECTKN; PASSWORD is rejected (SECCHKCD=16).
+  assert.deepEqual([...usrencpwd.get(CodePoint.SECTKN)], [...ciphertext]);
+  assert.equal(usrencpwd.has(CodePoint.PASSWORD), false);
+  assert.equal(usrencpwd.has(CodePoint.ENCALG), false);
+
   const userOnly = ddm.parseDdmParameters(ddm.packSecchk(4, new Uint8Array(), 'TESTDB', 'db2inst1', new TextEncoder().encode('must-not-be-sent'), false, 'cp500').subarray(4));
   assert.equal(new DataView(userOnly.get(CodePoint.SECMEC).buffer, userOnly.get(CodePoint.SECMEC).byteOffset, 2).getUint16(0, false), 4);
   assert.equal(decodeCp500(userOnly.get(CodePoint.USRID)), 'db2inst1');

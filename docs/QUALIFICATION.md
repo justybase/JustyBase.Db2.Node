@@ -32,6 +32,7 @@ The `--parity` lane runs `tests/live/smoke.test.js` plus `tests/live/parity-ibmd
 Every run writes a junit report and `tools/ci/check-junit-no-skips.cjs` fails the run when a test is skipped without an allowed reason, or when the report contains no test cases. Allowed skips are explicit and named:
 
 - `DB2_SECMEC9_TEST_DSN is not set` (offline lane; SECMEC 9 is an opt-in profile),
+- `DB2_SECMEC7_TEST_DSN is not set` (offline lane; SECMEC 7 is an opt-in `AUTHENTICATION=SERVER_ENCRYPT` profile),
 - `DB2_IBM_IMPORT_ORACLE is not set` (full suite only; the IBM .NET import cross-check needs an oracle this repository does not provision).
 
 Tests that need a profile that a lane does not provision (for example TLS outside `--full`) are reported as skipped and fail the gate in that lane, so a lane never looks green while silently verifying less.

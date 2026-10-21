@@ -204,6 +204,7 @@ export enum CodePoint {
   SVRCOD = 0x1149,
   SYNERRCD = 0x114A,
   TIMEOUT = 0x1907,
+  ENCALG = 0x1909,
   TRGDFTRT = 0x213B,
   FREPRVREF = 0x214C,
   ENDREF = 0x2163,

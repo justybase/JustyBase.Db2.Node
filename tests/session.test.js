@@ -1016,7 +1016,7 @@ test('connection refuses a server-selected security mechanism different from the
   const config = { ...mockConfig(server.address().port), securityMechanism: 3 };
   await assert.rejects(Db2Connection.connect(config), (error) => {
     assert.ok(error instanceof Db2UnsupportedFeatureError);
-    assert.match(error.message, /selected security mechanism 4.*requested 3/);
+    assert.match(error.message, /rejected security mechanism 3; the server accepts 4/);
     return true;
   });
   await serverTask;

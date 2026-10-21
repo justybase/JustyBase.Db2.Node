@@ -57,6 +57,7 @@ jobs:
         run: >-
           node tools/ci/check-junit-no-skips.cjs "${{ runner.temp }}/offline.junit.xml"
           --allow-skip 'DB2_SECMEC9_TEST_DSN is not set'
+          --allow-skip 'DB2_SECMEC7_TEST_DSN is not set'
 
       - name: Upload offline junit report
         if: always()

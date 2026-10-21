@@ -49,12 +49,12 @@ test('parses supported authentication modes and keeps unsupported ones fail-clos
   for (const [mode, mechanism] of [['SERVER_ENCRYPT', 9], ['server_encrypt', 9], ['KERBEROS', 11], ['GSSPLUGIN', 11]]) {
     assert.equal(parseDsn(`Database=TESTDB;Authentication=${mode}`).securityMechanism, mechanism);
   }
-  for (const [value, mechanism] of [['9', 9], ['dh_encrypted_password', 9], ['eusridpwd', 9], ['11', 11], ['kerberos', 11], ['gssapi', 11]]) {
+  for (const [value, mechanism] of [['7', 7], ['usrencpwd', 7], ['ENCRYPTED_PASSWORD_SECURITY', 7], ['secmec7', 7], ['9', 9], ['dh_encrypted_password', 9], ['eusridpwd', 9], ['11', 11], ['kerberos', 11], ['gssapi', 11]]) {
     assert.equal(parseDsn(`Database=TESTDB;security_mechanism=${value}`).securityMechanism, mechanism);
   }
   assert.equal(parseDsn('Database=TESTDB;gssapi_token_file=/tmp/token.bin').gssapiTokenFile, '/tmp/token.bin');
   assert.equal(parseDsn('Database=TESTDB;security_mechanism=11;gssapi_token=/tmp/t.bin').gssapiTokenFile, '/tmp/t.bin');
-  for (const option of ['Authentication=CLIENT', 'Authentication=TOKEN', 'Authentication=CERTIFICATE', 'security_mechanism=4', 'security_mechanism=6', 'security_mechanism=7', 'security_mechanism=10', 'security_mechanism=12', 'security_mechanism=garbage']) {
+  for (const option of ['Authentication=CLIENT', 'Authentication=TOKEN', 'Authentication=CERTIFICATE', 'security_mechanism=4', 'security_mechanism=6', 'security_mechanism=encrypted_password', 'security_mechanism=usrenpwd', 'security_mechanism=10', 'security_mechanism=12', 'security_mechanism=garbage']) {
     const [key, value] = option.split('=');
     assert.throws(() => parseDsn(`Database=TESTDB;${option}`), /unsupported DB2 authentication mode/);
     assert.throws(() => parseDsn(`db2://host/TESTDB?${key}=${encodeURIComponent(value)}`), /unsupported DB2 authentication mode/);
