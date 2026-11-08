@@ -2,7 +2,7 @@ import { performance } from "node:perf_hooks";
 import { publishDb2Diagnostic } from "../diagnostics.js";
 import type { Config } from "../config.js";
 import { normalizeAdminCommand } from "../admin.js";
-import { Db2BatchAbortError, Db2ConnectionClosedError, Db2PoolTimeoutError, Db2PoolExhaustedError, Db2ConnectTimeoutError } from "../errors.js";
+import { Db2BatchAbortError, Db2ConnectionClosedError, Db2PoolTimeoutError, Db2PoolExhaustedError, Db2ConnectTimeoutError, operationOutcomeOf } from "../errors.js";
 import { Db2Connection, Db2ProcedureReader, type Db2Parameter, type QueryOptions, type QueryResult, type QueryStreamRow } from "./session.js";
 
 export type Db2ConnectionFactory = (input: string | Config) => Promise<Db2Connection>;
@@ -370,6 +370,15 @@ export class Db2Pool {
     try {
       const born = this.timestamps.get(connection)?.born ?? performance.now();
       if (this.closed || connection.isClosed || performance.now() - born >= this.limits.maxLifetimeMs) {
+        this.total--;
+        this.closeDiscarded(connection);
+        this.wakeWaiter();
+        return;
+      }
+      // JDC OUT-07/POOL-05: a request whose outcome is unknown may have reached
+      // Db2. Never return that transport to the pool, even if the socket still
+      // looks healthy.
+      if (primaryError !== undefined && operationOutcomeOf(primaryError) === "unknown") {
         this.total--;
         this.closeDiscarded(connection);
         this.wakeWaiter();

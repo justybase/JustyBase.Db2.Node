@@ -9,7 +9,7 @@ import { decodeDecfloat } from "../converters/decfloat.js";
 import { buildSqlDtaWithExternalData, type Db2BlobStream, type Db2ClobStream, type Db2DbClobStream, type Db2XmlStream, type SqlDtaExternalParameter } from "../converters/sqlDta.js";
 import { Db2ImportError, emptyImportProgress, estimateImportRowBytes, quoteImportIdentifier, spoolImportLob, validateImportTarget, type Db2ImportOptions, type Db2ImportProgress, type Db2ImportTarget, type SpooledImportLob } from "../import.js";
 import { baseSqlType, SqlType } from "../types/sqltype.js";
-import { Db2AuthenticationError, Db2BatchAbortError, Db2BatchExecutionError, Db2BatchTimeoutError, Db2ConnectionClosedError, Db2ConfigurationError, Db2DatabaseNotFoundError, Db2Error, Db2ResourceLimitError, Db2ServerError, Db2TimeoutError, Db2UnsupportedFeatureError, type Db2Warning } from "../errors.js";
+import { Db2AuthenticationError, Db2AuthorizationError, Db2BatchAbortError, Db2BatchExecutionError, Db2BatchTimeoutError, Db2ConnectionClosedError, Db2ConfigurationError, Db2DatabaseNotFoundError, Db2Error, Db2ResourceLimitError, Db2ServerError, Db2TimeoutError, Db2UnsupportedFeatureError, type Db2Warning } from "../errors.js";
 import { CodePoint } from "./codepoint.js";
 import {
   ColumnDescription, FieldDescriptor, packAccrdb, packAccsec, packCommit,
@@ -443,6 +443,7 @@ export class Db2Connection {
   /** Mechanism the server accepted in ACCSECRD; 0 until the handshake completes. */
   private negotiatedSecurityMechanism = 0;
   private operationActive = false;
+  private requestWritten = false;
   private interruptSuppressionDepth = 0;
   private interruptPending: Promise<boolean> | undefined;
   private clientInfo: Db2ClientInfo = { applicationName: "", workstationName: "", userId: "", accounting: "", correlationToken: "" };
@@ -1507,7 +1508,7 @@ export class Db2Connection {
         const token = parseDdmParameters(reply.payload).get(CodePoint.RDBINTTKN);
         if (token?.length) this.rdbInterruptToken = token.slice();
       } else if (reply.codePoint === CodePoint.RDBAFLRM || reply.codePoint === CodePoint.RDBATHRM) {
-        throw new Db2AuthenticationError("DB2 authorization failed while connecting to the database");
+        throw new Db2AuthorizationError("DB2 authorization failed while connecting to the database");
       } else if (reply.codePoint === CodePoint.SQLERRRM) throw serverError(reply.payload);
     }
     await this.initializeSession();
@@ -2737,6 +2738,7 @@ export class Db2Connection {
 
   private async send(payload: Uint8Array, nextHasSameId: boolean, lastPacket: boolean, correlationId = this.correlationId): Promise<number> {
     const encoded = encodeRequestDss(payload, correlationId, nextHasSameId, lastPacket);
+    this.requestWritten = true;
     await writeSocket(this.socket, encoded.bytes);
     this.correlationId = encoded.nextId;
     return encoded.nextId;
@@ -2749,6 +2751,7 @@ export class Db2Connection {
     }
     const stream = "blobStream" in data ? data.blobStream : data.textLobStream;
     try {
+      this.requestWritten = true;
       this.correlationId = await writeExternalLobDss(
         this.socket,
         stream.source,
@@ -2831,6 +2834,7 @@ export class Db2Connection {
       if (this.interruptPending) await this.interruptPending.catch(() => {});
       if (options.signal?.aborted) throw options.signal.reason ?? new DOMException("The operation was aborted", "AbortError");
       const active = this.startOperation(options);
+      this.requestWritten = false;
       try {
         if (options.user !== undefined || options.clientInfo !== undefined) {
           await this.applyContextStateLocked(options.user, options.clientInfo);
@@ -2857,7 +2861,11 @@ export class Db2Connection {
     let deadlineRemaining = options.timeoutMs ?? 0;
     const deadlineEnabled = deadlineRemaining > 0;
     let deadlineStartedAt = 0;
-    const timeoutError = (): Db2TimeoutError => new Db2TimeoutError(`DB2 command timed out after ${options.timeoutMs} ms`);
+    const timeoutError = (): Db2TimeoutError => new Db2TimeoutError(
+      `DB2 command timed out after ${options.timeoutMs} ms`,
+      undefined,
+      this.requestWritten ? "unknown" : "not-started",
+    );
     const armDeadline = (): void => {
       if (finished || deadlineRemaining <= 0 || cancellationReason !== undefined) return;
       deadlineStartedAt = Date.now();

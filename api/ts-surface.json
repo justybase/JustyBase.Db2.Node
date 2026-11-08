@@ -3,6 +3,13 @@
   "package": "@justybase/db2",
   "items": [
     {
+      "name": "canonicalErrorCategory",
+      "kind": "function",
+      "declarations": [
+        "export declare function canonicalErrorCategory(category: Db2ErrorCategory): Db2CanonicalErrorCategory;"
+      ]
+    },
+    {
       "name": "clearAllDb2Pools",
       "kind": "function",
       "declarations": [
@@ -38,10 +45,17 @@
       ]
     },
     {
+      "name": "Db2AuthorizationError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2AuthorizationError extends Db2Error { constructor(message: string); }"
+      ]
+    },
+    {
       "name": "Db2BatchAbortError",
       "kind": "class",
       "declarations": [
-        "export declare class Db2BatchAbortError extends DOMException { readonly completedParameterSets: number; readonly inFlightParameterSetIndex: number | undefined; readonly rowsAffected: number; readonly cause: unknown; constructor(completedParameterSets: number, inFlightParameterSetIndex: number | undefined, rowsAffected: number, cause: unknown); }"
+        "export declare class Db2BatchAbortError extends DOMException { readonly completedParameterSets: number; readonly inFlightParameterSetIndex: number | undefined; readonly rowsAffected: number; readonly cause: unknown; readonly category: \"operation-cancelled\"; readonly canonicalCategory: \"operation-cancelled\"; readonly outcome: Db2OperationOutcome; readonly sqlCode: undefined; readonly sqlState: undefined; readonly securityCode: undefined; constructor(completedParameterSets: number, inFlightParameterSetIndex: number | undefined, rowsAffected: number, cause: unknown); }"
       ]
     },
     {
@@ -63,6 +77,13 @@
       "kind": "type",
       "declarations": [
         "export type Db2BinaryLobStream = { readonly kind: \"binary-lob\"; readonly length: bigint; stream(): AsyncIterable<Uint8Array>; };"
+      ]
+    },
+    {
+      "name": "Db2CanonicalErrorCategory",
+      "kind": "type",
+      "declarations": [
+        "export type Db2CanonicalErrorCategory = \"configuration\" | \"connection-closed\" | \"database-not-found\" | \"authentication\" | \"authorization\" | \"parameter-conversion\" | \"sql-server\" | \"server-response\" | \"transport\" | \"protocol\" | \"resource-limit\" | \"operation-cancelled\" | \"timeout\" | \"unsupported\" | \"pool-timeout\" | \"pool-exhausted\" | \"batch-execution\" | \"other\";"
       ]
     },
     {
@@ -118,14 +139,14 @@
       "name": "Db2Error",
       "kind": "class",
       "declarations": [
-        "export declare class Db2Error extends Error { readonly category: Db2ErrorCategory; readonly outcome: Db2OperationOutcome; readonly sqlCode: number | undefined; readonly sqlState: string | undefined; readonly securityCode: number | undefined; constructor(message: string, category: Db2ErrorCategory, options?: { cause?: unknown; sqlCode?: number; sqlState?: string; securityCode?: number; }); }"
+        "export declare class Db2Error extends Error { readonly category: Db2ErrorCategory; readonly outcome: Db2OperationOutcome; readonly sqlCode: number | undefined; readonly sqlState: string | undefined; readonly securityCode: number | undefined; constructor(message: string, category: Db2ErrorCategory, options?: { cause?: unknown; sqlCode?: number; sqlState?: string; securityCode?: number; outcome?: Db2OperationOutcome; }); get canonicalCategory(): Db2CanonicalErrorCategory; }"
       ]
     },
     {
       "name": "Db2ErrorCategory",
       "kind": "type",
       "declarations": [
-        "export type Db2ErrorCategory = \"invalid-connection-string\" | \"invalid-configuration\" | \"connection-closed\" | \"database-not-found\" | \"authentication\" | \"server\" | \"batch-execution\" | \"unsupported-feature\" | \"pool-timeout\" | \"pool-exhausted\" | \"transport\" | \"protocol\" | \"resource-limit\";"
+        "export type Db2ErrorCategory = \"invalid-connection-string\" | \"invalid-configuration\" | \"connection-closed\" | \"database-not-found\" | \"authentication\" | \"authorization\" | \"parameter-conversion\" | \"server\" | \"server-response\" | \"batch-execution\" | \"operation-cancelled\" | \"timeout\" | \"unsupported-feature\" | \"pool-timeout\" | \"pool-exhausted\" | \"transport\" | \"protocol\" | \"resource-limit\" | \"other\";"
       ]
     },
     {
@@ -192,6 +213,13 @@
       ]
     },
     {
+      "name": "Db2OperationCancelledError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2OperationCancelledError extends Db2Error { constructor(message?: string, outcome?: Db2OperationOutcome, cause?: unknown); }"
+      ]
+    },
+    {
       "name": "Db2OperationOutcome",
       "kind": "type",
       "declarations": [
@@ -203,6 +231,13 @@
       "kind": "type",
       "declarations": [
         "export type Db2Parameter = { value: unknown; direction: Db2ParameterDirection; };"
+      ]
+    },
+    {
+      "name": "Db2ParameterConversionError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2ParameterConversionError extends Db2Error { constructor(message: string, cause?: unknown); }"
       ]
     },
     {
@@ -283,6 +318,13 @@
       ]
     },
     {
+      "name": "Db2ServerResponseError",
+      "kind": "class",
+      "declarations": [
+        "export declare class Db2ServerResponseError extends Db2Error { constructor(message: string); }"
+      ]
+    },
+    {
       "name": "Db2Statement",
       "kind": "class",
       "declarations": [
@@ -300,7 +342,7 @@
       "name": "Db2TimeoutError",
       "kind": "class",
       "declarations": [
-        "export declare class Db2TimeoutError extends DOMException { readonly cause?: unknown; constructor(message?: string, cause?: unknown); }"
+        "export declare class Db2TimeoutError extends DOMException { readonly cause?: unknown; readonly category: \"timeout\"; readonly canonicalCategory: \"timeout\"; readonly outcome: Db2OperationOutcome; readonly sqlCode: undefined; readonly sqlState: undefined; readonly securityCode: undefined; constructor(message?: string, cause?: unknown, outcome?: Db2OperationOutcome); }"
       ]
     },
     {
@@ -339,6 +381,13 @@
       ]
     },
     {
+      "name": "operationOutcomeOf",
+      "kind": "function",
+      "declarations": [
+        "export declare function operationOutcomeOf(error: unknown): Db2OperationOutcome | undefined;"
+      ]
+    },
+    {
       "name": "parseDsn",
       "kind": "function",
       "declarations": [
@@ -367,5 +416,5 @@
       ]
     }
   ],
-  "digest": "3fdf78c323135a902946ce589a7221e7bdc258d01b614a3ab0bb2d9bc32c4128"
+  "digest": "594a7446d512428e7de9e286f1c321cd1ab8c3cbb9be3b33adc36bde405488c3"
 }

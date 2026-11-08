@@ -13,24 +13,24 @@ pass; this file records them, it does not waive the requirement.
 
 | Status | Requirements |
 | --- | --- |
-| compliant | ERR-05–08, OUT-01, OUT-06–07, DSN-01, DSN-03–06, DSN-09–10, LIM-03–05, LIM-08, POOL-01–07, SES-01–05, SES-07–10, VAL-01–10, CAN-01–02, CAN-04–07, CAN-09, BAT-01, BAT-03–06, BAT-07–09 |
-| partial | ERR-01, ERR-03–04, ERR-09, OUT-08, DSN-02, LIM-01, LIM-06 |
-| gap | ERR-02, OUT-02–05, OUT-09, DSN-07–08, LIM-02, LIM-07, SES-06, CAN-03, CAN-08, BAT-02 |
+| compliant | ERR-02, ERR-05–09, OUT-01, OUT-06–09, DSN-01, DSN-03–06, DSN-09–10, LIM-03–05, LIM-08, POOL-01–07, SES-01–05, SES-07–10, VAL-01–10, CAN-01–09, BAT-01, BAT-03–06, BAT-07–09 |
+| partial | ERR-01, ERR-03–04, OUT-02–05, DSN-02, LIM-01, LIM-06 |
+| gap | DSN-07–08, LIM-02, LIM-07, SES-06, BAT-02 |
 
 ## Details
 
 | Requirements | Status | Notes |
 | --- | --- | --- |
-| ERR-01 | partial | Most failures are `Db2Error` with `category`/`outcome`; `Db2TimeoutError`, `Db2BatchAbortError` and `Db2BatchTimeoutError` are `DOMException`s without a canonical category/outcome. |
-| ERR-02 | gap | No `authorization`, `parameter-conversion`, `server-response`, `operation-cancelled`, `timeout` or `other` category; `invalid-connection-string` is an extra category. Authorization failures currently surface as `authentication`. |
-| ERR-03–04 | partial | SQL/auth/transport/protocol/resource/pool/batch mapping is stable; the missing categories and the authz-as-auth mapping break canonical equivalence. |
+| ERR-01 | partial | Most failures are `Db2Error`; timeout and batch wrappers now expose `category`/`outcome` too. Raw socket errors still surface as plain `Error`. |
+| ERR-02 | compliant | All canonical categories exist, including `authorization`, `parameter-conversion`, `server-response`, `operation-cancelled`, `timeout` and `other`. Extras (`server`, `invalid-connection-string`, `unsupported-feature`) map through `canonicalCategory`. |
+| ERR-03–04 | partial | SQL/auth/authz/transport/protocol/resource/pool/batch mapping is stable; `canonicalCategory` gives cross-driver equivalence, but raw socket errors are still unclassified. |
 | ERR-05–08 | compliant | SQLCODE/SQLSTATE, message format (`SQLCODE=… SQLSTATE=…`), redaction and batch progress are present. |
-| ERR-09 | partial | String categories are already close to canonical; `invalid-connection-string` must be documented as `configuration` for serialized use. |
+| ERR-09 | compliant | Serialized diagnostics use `canonicalCategory`; `server` → `sql-server`, `invalid-connection-string` → `configuration`, `unsupported-feature` → `unsupported`. |
 | OUT-01 | compliant | Public spellings are exactly `not-started`, `confirmed`, `unknown`. |
-| OUT-02–05 | gap | `outcome` is computed from the category and the presence of SQLCODE, not from the operation phase. |
-| OUT-06–07 | compliant | No automatic replay of mutating work; uncertain sessions are discarded. |
-| OUT-08 | partial | Batch errors expose completed sets, in-flight index and rows; the outcome itself is category-derived. |
-| OUT-09 | gap | A confirmed `-952` is a `server` error; there is no `operation-cancelled` category. |
+| OUT-02–05 | partial | A command timeout records whether the first request was written and reports `not-started`/`unknown`; batch wrappers derive the outcome from the failing set. Raw transport errors still do not carry an outcome. |
+| OUT-06–07 | compliant | No automatic replay of mutating work; uncertain sessions are discarded, and the pool now discards a lease whose classified outcome is `unknown`. |
+| OUT-08 | compliant | Batch errors expose completed sets, in-flight index and rows, and derive `confirmed`/`not-started`/`unknown` from the cause and failing set. |
+| OUT-09 | compliant | A confirmed `-952` is `operation-cancelled` with `confirmed`; unconfirmed settlement is `unknown`. |
 | DSN-01 | compliant | Case-insensitive key/value and URL parsing; last value wins. |
 | DSN-03–06 | compliant | `currentschema`, security mechanism, TLS and authentication shorthand are implemented. |
 | DSN-02 | partial | Core aliases are present except `krb5_principal`/`kerberos_principal`/`client_principal` and `kerberos_spn`. |
@@ -50,9 +50,9 @@ pass; this file records them, it does not waive the requirement.
 | SES-08–10 | compliant | Per-session transaction state, ordered batch progress and `AbortSignal` support are present. |
 | VAL-01–10 | compliant | Exact strings are used for DECIMAL/DECFLOAT and temporal values; NULL, binary, CP500, metadata and progressive LOB rules are met. |
 | CAN-01–02 | compliant | Two-step interrupt and original-operation settlement are implemented. |
-| CAN-03 | gap | A confirmed `-952` is a `server` error, not `operation-cancelled`; SQLCODE/SQLSTATE are preserved. |
+| CAN-03 | compliant | A confirmed `-952` is `operation-cancelled` with `confirmed`; SQLCODE/SQLSTATE are preserved. |
 | CAN-04–07 | compliant | Race handling, unconfirmed discard, idle cancellation and idempotent cancel are covered. |
-| CAN-08 | gap | `Db2TimeoutError` is a `DOMException` with no JDC kind/outcome. |
+| CAN-08 | compliant | `Db2TimeoutError` carries `category: timeout` and a phase-derived outcome; a confirmed `-952` becomes `confirmed`, a settlement failure `unknown`. |
 | CAN-09 | compliant | Cancellation is safe from another task while the operation lock is held. |
 | BAT-01 | compliant | Ordered execution, stop-on-first-failure and completed/affected counts. |
 | BAT-02 | gap | `executeBatch` accepts no bounded options; it loops over all sets. |

@@ -35,7 +35,10 @@ test('live Db2 command deadline interrupts a lock wait and deadline batch report
     await new Promise(resolve => setTimeout(resolve, 300));
     assert.equal(await Promise.race([command.then(() => true, () => true), new Promise(resolve => setTimeout(() => resolve(false), 0))]), false,
       'the update should still be waiting on the row lock before its deadline');
-    await assert.rejects(command, error => error instanceof Db2TimeoutError && error.name === 'TimeoutError');
+    await assert.rejects(command, error => error instanceof Db2TimeoutError
+      && error.name === 'TimeoutError'
+      && error.category === 'timeout'
+      && error.outcome === 'unknown');
     assert.equal(waiter.isClosed, false, 'confirmed SQLCODE -952 should leave this live session reusable');
     await transaction.rollback();
     transaction = undefined;
@@ -52,6 +55,8 @@ test('live Db2 command deadline interrupts a lock wait and deadline batch report
     await assert.rejects(batch, error => error instanceof Db2BatchTimeoutError
       && error instanceof Db2TimeoutError
       && error.name === 'TimeoutError'
+      && error.category === 'timeout'
+      && error.outcome === 'unknown'
       && error.completedParameterSets === 1
       && error.inFlightParameterSetIndex === 1
       && error.rowsAffected === 1

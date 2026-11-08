@@ -18,6 +18,15 @@ release decision made through the manual publish workflow.
 - Added the self-contained JDC v1 contract (`docs/DRIVER-CONTRACT.md`) and the
   repo-specific conformance record (`docs/DRIVER-CONTRACT-STATUS.md`). No API or
   behaviour changes.
+- Added the canonical `authorization`, `parameter-conversion`,
+  `server-response`, `operation-cancelled`, `timeout` and `other` categories.
+  `Db2Error.canonicalCategory` maps language-specific extras (`server`,
+  `invalid-connection-string`, `unsupported-feature`) to their JDC identifiers.
+- `Db2ServerError` reports `-952` as `operation-cancelled` with a confirmed
+  outcome. `Db2TimeoutError`, `Db2BatchAbortError`, `Db2BatchTimeoutError` and
+  `Db2BatchExecutionError` now expose phase-derived outcomes, and the pool
+  discards a lease whose classified outcome is `unknown`. API snapshot
+  regenerated for the additive exports.
 
 ## [0.1.0-alpha.3] - 2026-10-21
 

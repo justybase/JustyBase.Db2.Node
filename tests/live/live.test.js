@@ -248,7 +248,7 @@ test('live Db2 interrupts a lock-waiting statement and decodes SQLERRRM diagnost
     await new Promise(resolve => setTimeout(resolve, 500));
     assert.equal(await waiter.interrupt(), true);
     const outcome = await blockedUpdate;
-    assert.equal(outcome.error?.category, 'server');
+    assert.equal(outcome.error?.category, 'operation-cancelled');
     assert.equal(outcome.error?.sqlCode, -952);
 
     await transaction.rollback();
