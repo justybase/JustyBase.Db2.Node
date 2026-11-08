@@ -66,6 +66,10 @@ Use `security_mechanism=7` (also `secmec=7`, `usrencpwd` or `encrypted_password_
 
 Maintainer qualification currently targets Db2 LUW 12.1.5 over TCP and Db2 LUW 12.1.5 over TLS. See [Qualification and compatibility](docs/QUALIFICATION.md).
 
+## Cross-driver contract
+
+The observable behaviour implemented here is defined by [JDC v1](docs/DRIVER-CONTRACT.md); known gaps are recorded in [the status file](docs/DRIVER-CONTRACT-STATUS.md).
+
 ## Installation
 
 The current alpha is published to npm as `@justybase/db2@0.1.0-alpha.3` under the `alpha` dist-tag:
