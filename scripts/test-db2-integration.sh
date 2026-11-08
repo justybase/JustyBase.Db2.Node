@@ -366,7 +366,7 @@ if [ "$SUITE" = "full" ]; then
 fi
 
 # ---------------------------------------------------------------- log capacity ---
-# Same provisioning rule as the C# qualification (db2-conformance manifest, LOGSECOND
+# Same provisioning rule as the C# qualification (maintainer manifest, LOGSECOND
 # 512): an atomic import keeps its whole transaction in the active log, so the
 # default 22 secondary files (about 152 MiB) can run out during a long soak and fail
 # with SQL-964/57011. The change is an online test-database setting, raised only, and

@@ -1,6 +1,6 @@
 # Qualification and compatibility
 
-This document summarizes the compatibility and release gates used for the current alpha. Detailed cross-driver qualification evidence is maintained privately by the project maintainer; this repository contains only a public-safe summary.
+This document summarizes the compatibility and release gates used for the current alpha. Detailed cross-driver qualification evidence is maintained privately by the project maintainer; this repository contains only a public-safe summary and builds and tests without access to that private harness.
 
 ## Current tested baseline
 

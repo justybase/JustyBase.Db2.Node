@@ -10,6 +10,12 @@ release decision made through the manual publish workflow.
 
 ## [Unreleased]
 
+### Changed
+
+- `API-COMPATIBILITY.md` now describes the actual publication state: the
+  package is published under the `alpha` dist-tag by the manual `publish.yml`
+  workflow, so `private` must not be set and `publishConfig.access` is `public`.
+
 ## [0.1.0-alpha.3] - 2026-10-21
 
 ### Changed
