@@ -1200,7 +1200,6 @@ export class Db2Connection {
     const target = database.trim();
     if (!target) throw new TypeError("DB2 database name must not be empty");
     if (target.length > 128 || target.includes("\0")) throw new RangeError(`invalid DB2 database name ${JSON.stringify(database)}`);
-    if (target === this.config.database) return;
     return this.exclusive(async () => {
       this.ensureOpen();
       if (this.transactionActive || !this.autoCommit)

@@ -138,6 +138,8 @@ test('changeDatabase validates names before any I/O', async (t) => {
     await assert.rejects(connection.changeDatabase('D'.repeat(129)), /invalid DB2 database name/u);
     assert.equal(connections, 1, 'invalid names never reach the server');
     assert.equal(connection.currentDatabase, 'TESTDB');
+    await connection.close();
+    await assert.rejects(connection.changeDatabase('TESTDB'), /connection is closed/u);
   } finally {
     await connection.close();
     await server.task;
@@ -159,6 +161,7 @@ test('changeDatabase refuses while a transaction is active', async (t) => {
   try {
     await connection.beginTransaction();
     await assert.rejects(connection.changeDatabase('OTHERDB'), /transaction is active/u);
+    await assert.rejects(connection.changeDatabase('TESTDB'), /transaction is active/u);
     assert.equal(connection.currentDatabase, 'TESTDB');
   } finally {
     await connection.close();
@@ -181,6 +184,7 @@ test('changeDatabase refuses on a pooled session', async (t) => {
   try {
     connection.poolBaselineCaptured = true;
     await assert.rejects(connection.changeDatabase('OTHERDB'), /pooled session/u);
+    await assert.rejects(connection.changeDatabase('TESTDB'), /pooled session/u);
     assert.equal(connection.currentDatabase, 'TESTDB');
   } finally {
     await connection.close();

@@ -20,7 +20,7 @@
       "name": "Config",
       "kind": "type",
       "declarations": [
-        "export type Config = { host: string; port: number; database: string; currentSchema?: string; user: string; password: string; useSsl: boolean; sslRootCaPath: string; sslClientCertPath: string; sslClientKeyPath: string; timeoutMs: number; blockSize: number; securityMechanism: number; kerberosSpn: string; kerberosRealm: string; kerberosPrincipal: string; krb5ConfigFile: string; krb5KeytabFile: string; krb5CcacheFile: string; gssapiTokenFile: string; clientApplName: string; clientWrkstnName: string; clientUserid: string; clientAcctng: string; clientCorrToken: string; params: Record<string, string>; };"
+        "export type Config = { host: string; port: number; database: string; currentSchema?: string; user: string; password: string; useSsl: boolean; sslRootCaPath: string; sslClientCertPath: string; sslClientKeyPath: string; timeoutMs: number; blockSize: number; securityMechanism: number; kerberosSpn: string; kerberosRealm: string; kerberosPrincipal?: string; krb5ConfigFile: string; krb5KeytabFile: string; krb5CcacheFile: string; gssapiTokenFile: string; clientApplName: string; clientWrkstnName: string; clientUserid: string; clientAcctng: string; clientCorrToken: string; params: Record<string, string>; };"
       ]
     },
     {
@@ -423,5 +423,5 @@
       ]
     }
   ],
-  "digest": "79ea8afb0b0a2e1ed8f9b91e5e6027e6650300e04742042a0ae07cb0926ca4c7"
+  "digest": "6d0d751c9ca7fde55311613a7de51413738a0c869254ab7d92aa5cbc7a563215"
 }

@@ -16,7 +16,8 @@ export type Config = {
   securityMechanism: number;
   kerberosSpn: string;
   kerberosRealm: string;
-  kerberosPrincipal: string;
+  /** Optional so adding the JDC principal alias does not break existing Config literals. */
+  kerberosPrincipal?: string;
   krb5ConfigFile: string;
   krb5KeytabFile: string;
   krb5CcacheFile: string;

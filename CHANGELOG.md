@@ -37,8 +37,11 @@ release decision made through the manual publish workflow.
   `kerberosprincipal`/`client_principal` spellings. Unknown `krb5`/`kerberos`/
   `gssapi` keys now fail closed, and an explicit empty `currentschema` is
   rejected. `Db2Connection` exposes a public `currentSchema` getter that reports
-  only a schema the driver set. API snapshot regenerated for the additive
-  exports.
+  only a schema the driver set. `Config.kerberosPrincipal` stays optional so
+  existing `Config` literals keep compiling; `newConfig()` still supplies the
+  empty default. API snapshot regenerated for the additive exports.
+- `changeDatabase` validates an open session, an inactive transaction and a
+  non-pooled lease before treating a same-name switch as a no-op.
 
 ## [0.1.0-alpha.3] - 2026-10-21
 
