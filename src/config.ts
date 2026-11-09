@@ -185,7 +185,9 @@ export function applyParam(config: Config, key: string, value: string): void {
     }
     case "block_size": case "blocksize": case "qryblksz": {
       const size = Number(value);
-      if (Number.isInteger(size) && size >= 1_024 && size <= 1_048_576) config.blockSize = size;
+      if (!Number.isInteger(size) || size < 1_024 || size > 1_048_576)
+        throw new DsnError("DB2 block_size must be an integer between 1024 and 1048576");
+      config.blockSize = size;
       break;
     }
     case "security_mechanism": case "secmec": case "auth_mechanism": case "auth":

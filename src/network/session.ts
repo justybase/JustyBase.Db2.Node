@@ -56,6 +56,13 @@ export type QueryOptions = {
    * Omitted fields keep their current session value, matching `setClientInfo` semantics. */
   clientInfo?: Partial<Db2ClientInfo>;
 };
+/** Bounds one batch chunk by parameter-set count and an estimated encoded-byte budget. */
+export type Db2BatchOptions = {
+  /** Maximum parameter sets in one chunk; 1..32767, defaults to 256. */
+  maxRows?: number;
+  /** Soft encoded-byte budget for one chunk; defaults to 8 MiB. */
+  maxBytes?: number;
+};
 export type Db2InsertResult = { rowsAffected: number; lastInsertId: bigint };
 export type Db2ParameterDirection = "input" | "output" | "inputOutput";
 /** Output parameters carry a typed placeholder in value for the SQLDTA request. */
@@ -758,7 +765,13 @@ export class Db2Connection {
   }
 
   /** Executes positional parameter sets in order; Db2BatchExecutionError reports acknowledged partial progress. */
-  async executeBatch(sql: string, parameterSets: readonly (readonly unknown[])[], options: QueryOptions = {}): Promise<number> {
+  async executeBatch(sql: string, parameterSets: readonly (readonly unknown[])[], options: QueryOptions & Db2BatchOptions = {}): Promise<number> {
+    const maxRows = options.maxRows ?? 256;
+    const maxBytes = options.maxBytes ?? 8 * 1024 * 1024;
+    if (!Number.isSafeInteger(maxRows) || maxRows < 1 || maxRows > 32767)
+      throw new RangeError("DB2 batch maxRows must be an integer between 1 and 32767");
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1)
+      throw new RangeError("DB2 batch maxBytes must be a positive safe integer");
     let affected = 0;
     let completed = 0;
     let inFlight: number | undefined;
@@ -770,14 +783,25 @@ export class Db2Connection {
         try { statement = await this.prepareLocked(sql); }
         catch (error) { throw new Db2BatchExecutionError(undefined, 0, 0, error); }
 
-        for (const params of parameterSets) {
-          inFlight = completed;
-          let currentAffected: number;
-          try { currentAffected = await this.executePreparedLocked(statement, params, true); }
-          catch (error) { throw new Db2BatchExecutionError(completed, completed, affected, error); }
-          affected += currentAffected;
-          completed++;
-          inFlight = undefined;
+        let index = 0;
+        while (index < parameterSets.length) {
+          let chunkBytes = 0;
+          let chunkCount = 0;
+          while (index < parameterSets.length && chunkCount < maxRows) {
+            const params = parameterSets[index]!;
+            const rowBytes = estimateImportRowBytes(params);
+            if (chunkCount > 0 && rowBytes > maxBytes - chunkBytes) break;
+            chunkBytes += Math.min(rowBytes, maxBytes);
+            chunkCount++;
+            inFlight = completed;
+            let currentAffected: number;
+            try { currentAffected = await this.executePreparedLocked(statement, params, true); }
+            catch (error) { throw new Db2BatchExecutionError(completed, completed, affected, error); }
+            affected += currentAffected;
+            completed++;
+            index++;
+            inFlight = undefined;
+          }
         }
         return affected;
       }, options);
@@ -2788,14 +2812,14 @@ export class Db2Connection {
       if (replies.length >= DSS_LIMITS.maxReplyChainPackets) {
         this.closed = true;
         this.socket.destroy();
-        throw new Error(`DB2 reply chain exceeded ${DSS_LIMITS.maxReplyChainPackets} packets`);
+        throw new Db2ResourceLimitError(`DB2 reply chain exceeded ${DSS_LIMITS.maxReplyChainPackets} packets`);
       }
       const reply = await readDss(this.reader);
       totalBytes += reply.payload.length + 6;
       if (totalBytes > DSS_LIMITS.maxReplyChainBytes) {
         this.closed = true;
         this.socket.destroy();
-        throw new Error(`DB2 reply chain exceeded ${DSS_LIMITS.maxReplyChainBytes} bytes`);
+        throw new Db2ResourceLimitError(`DB2 reply chain exceeded ${DSS_LIMITS.maxReplyChainBytes} bytes`);
       }
       replies.push(reply);
       chained = reply.header.chained;

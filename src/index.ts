@@ -27,6 +27,7 @@ export {
   connectDb2,
 } from "./network/session.js";
 export type {
+  Db2BatchOptions,
   Db2BinaryLobStream,
   Db2ClientInfo,
   Db2ExecutionResult,

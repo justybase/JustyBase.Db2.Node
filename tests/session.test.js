@@ -2921,9 +2921,9 @@ test('query discards the session when the reply chain exceeds the packet limit',
       const reader = await serveConnectionSetup(socket);
       const query = await readChain(reader);
       assert.deepEqual(query.map(packet => packet.codePoint), [CodePoint.PRPSQLSTT, CodePoint.SQLSTT, CodePoint.OPNQRY]);
-      // 2049 tiny DDM replies, all chained except the last, exceed the 2048-packet cap.
-      for (let index = 0; index <= 2048; index++) {
-        await reply(socket, CodePoint.SQLCARD, new Uint8Array(), index < 2048);
+      // 4097 tiny DDM replies, all chained except the last, exceed the 4096-packet cap.
+      for (let index = 0; index <= 4096; index++) {
+        await reply(socket, CodePoint.SQLCARD, new Uint8Array(), index < 4096);
       }
       await new Promise((resolve) => socket.once('close', resolve));
     })();
@@ -2934,7 +2934,7 @@ test('query discards the session when the reply chain exceeds the packet limit',
 
   const connection = await Db2Connection.connect(mockConfig(server.address().port));
   try {
-    await assert.rejects(connection.query('SELECT 1 FROM EXCESSIVE_CHAIN_FIXTURE'), /exceeded 2048 packets/);
+    await assert.rejects(connection.query('SELECT 1 FROM EXCESSIVE_CHAIN_FIXTURE'), /exceeded 4096 packets/);
     assert.equal(connection.isClosed, true, 'an oversized reply chain must not leave a reusable session');
   } finally {
     await connection.close();

@@ -1,3 +1,4 @@
+import { Db2ResourceLimitError } from "../errors.js";
 import { CodePoint } from "./codepoint.js";
 
 export const DSS_MAGIC = 0xd0;
@@ -24,13 +25,13 @@ export type ByteReader = {
 /** Resource limits: a corrupt/malicious server must not force unbounded allocation. */
 export const DSS_LIMITS = {
   /** Maximum single DSS object body (payload across all continuation segments). */
-  maxDssObjectBytes: 256 * 1024 * 1024,
+  maxDssObjectBytes: 64 * 1024 * 1024,
   /** Maximum accumulated bytes in one reply chain (readReplyChain). */
-  maxReplyChainBytes: 512 * 1024 * 1024,
+  maxReplyChainBytes: 256 * 1024 * 1024,
   /** Maximum DSS packets in one reply chain. */
-  maxReplyChainPackets: 2048,
+  maxReplyChainPackets: 4096,
   /** Maximum single DDM object body. */
-  maxDdmObjectBytes: 256 * 1024 * 1024,
+  maxDdmObjectBytes: 64 * 1024 * 1024,
   /** Maximum materialized LOB value. */
   maxLobMaterializationBytes: 16 * 1024 * 1024,
   /** Maximum retained data in one materialized query result. */
@@ -79,7 +80,7 @@ export function encodeRequestDss(payload: Uint8Array, currentId: number, nextHas
   // Each continuation after the first adds a 2-byte header.
   const totalLength = payload.length + 6 + (segments - 1) * 2;
   if (payload.length > DSS_LIMITS.maxDssObjectBytes)
-    throw new Error(`DSS request of ${payload.length} bytes exceeds the ${DSS_LIMITS.maxDssObjectBytes}-byte limit`);
+    throw new Db2ResourceLimitError(`DSS request of ${payload.length} bytes exceeds the ${DSS_LIMITS.maxDssObjectBytes}-byte limit`);
   const bytes = new Uint8Array(totalLength);
   const view = new DataView(bytes.buffer);
   let offset = 0;
@@ -213,7 +214,7 @@ function writeSocketFrame(destination: DssByteWriter, frame: Uint8Array): Promis
 
 export function readDdmObject(body: Uint8Array): { codePoint: number; payload: Uint8Array } {
   if (body.length < 4) throw new Error(`invalid DDM object length: DSS body holds ${body.length} bytes`);
-  if (body.length > DSS_LIMITS.maxDdmObjectBytes + 12) throw new Error(`DDM object of ${body.length} bytes exceeds the ${DSS_LIMITS.maxDdmObjectBytes}-byte limit`);
+  if (body.length > DSS_LIMITS.maxDdmObjectBytes + 12) throw new Db2ResourceLimitError(`DDM object of ${body.length} bytes exceeds the ${DSS_LIMITS.maxDdmObjectBytes}-byte limit`);
   const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
   const encodedLength = view.getUint16(0, false); const codePoint = view.getUint16(2, false);
   if ((encodedLength & 0x8000) === 0) {
@@ -225,7 +226,7 @@ export function readDdmObject(body: Uint8Array): { codePoint: number; payload: U
   if (extendedBytes === 0) return { codePoint, payload: body.subarray(4) };
   if (extendedBytes < 0 || extendedBytes > 8 || 4 + extendedBytes > body.length) throw new Error(`invalid DDM extended length field 0x${encodedLength.toString(16).padStart(4, "0")}`);
   let dataLength = 0n; for (const value of body.subarray(4, 4 + extendedBytes)) dataLength = (dataLength << 8n) | BigInt(value);
-  if (dataLength > BigInt(DSS_LIMITS.maxDdmObjectBytes)) throw new Error(`DDM extended length ${dataLength} exceeds the ${DSS_LIMITS.maxDdmObjectBytes}-byte limit`);
+  if (dataLength > BigInt(DSS_LIMITS.maxDdmObjectBytes)) throw new Db2ResourceLimitError(`DDM extended length ${dataLength} exceeds the ${DSS_LIMITS.maxDdmObjectBytes}-byte limit`);
   const capacity = BigInt(body.length - 4 - extendedBytes);
   if (dataLength > capacity) throw new Error(`DDM extended length ${dataLength} exceeds DSS payload ${capacity}`);
   const start = 4 + extendedBytes; return { codePoint, payload: body.subarray(start, start + Number(dataLength)) };
@@ -240,7 +241,7 @@ export async function readDss(reader: ByteReader): Promise<DssPacket> {
   const header: DssHeader = { length, type: flags & 0x0f, chained: (flags & DSS_FLAG_CHAINED) !== 0, sameId: (flags & DSS_FLAG_SAME_ID) !== 0, hasError: (flags & DSS_FLAG_ERROR) !== 0, correlationId: view.getUint16(4, false) };
   const firstLength = length & ~CONTINUATION;
   if (firstLength < 6) throw new Error(`invalid DSS frame length ${firstLength}: less than header size 6`);
-  if (firstLength - 6 > DSS_LIMITS.maxDssObjectBytes) throw new Error(`DSS frame of ${firstLength - 6} bytes exceeds the ${DSS_LIMITS.maxDssObjectBytes}-byte limit`);
+  if (firstLength - 6 > DSS_LIMITS.maxDssObjectBytes) throw new Db2ResourceLimitError(`DSS frame of ${firstLength - 6} bytes exceeds the ${DSS_LIMITS.maxDssObjectBytes}-byte limit`);
   const continued = (length & CONTINUATION) !== 0;
   if (!continued) {
     // Single-segment fast path: no second copy (parts[0] used directly).
@@ -260,7 +261,7 @@ export async function readDss(reader: ByteReader): Promise<DssPacket> {
   let body = new Uint8Array(Math.min(Math.max(firstLength - 6, 32768), DSS_LIMITS.maxDssObjectBytes));
   const append = async (length: number): Promise<void> => {
     if (total + length > DSS_LIMITS.maxDssObjectBytes)
-      throw new Error(`DSS continuation chain exceeds the ${DSS_LIMITS.maxDssObjectBytes}-byte limit`);
+      throw new Db2ResourceLimitError(`DSS continuation chain exceeds the ${DSS_LIMITS.maxDssObjectBytes}-byte limit`);
     if (total + length > body.length) {
       const grown = Math.min(
         DSS_LIMITS.maxDssObjectBytes,

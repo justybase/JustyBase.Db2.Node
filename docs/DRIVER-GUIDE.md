@@ -52,6 +52,12 @@ BLOB/CLOB/DBCLOB/XML stream parameter types accept an async iterable plus a decl
 
 The declared length is part of the wire contract. Provide a source that contains exactly the intended payload when it may be reused.
 
+## Batches and resource limits
+
+`executeBatch` accepts `Db2BatchOptions` alongside the usual query options: `maxRows` defaults to 256 (valid 1..32767) and `maxBytes` defaults to 8 MiB. The byte limit is soft, so one oversized parameter set is still sent alone.
+
+The protocol abuse caps are fixed at the JDC defaults: 64 MiB DSS, 64 MiB DDM, 256 MiB / 4096-packet reply chains, 16 MiB materialized LOB, 32 MiB materialized result, 1 GiB streamed LOB and 64 KiB chunks. DSS/DDM/reply-chain overflow is a `resource-limit` error and discards the session.
+
 ## Cancellation and command deadlines
 
 Cancellation uses a separate DRDA interrupt exchange.

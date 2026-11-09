@@ -143,7 +143,6 @@ test('DSN parity corpus: URL and key/value edge cases accept or reject consisten
     { input: 'db2://u:p@host/TESTDB?timeout=abc', expect: { timeoutMs: 30000 } },
     { input: 'db2://u:p@host/TESTDB?port=abc', expect: { port: 50000 } },
     { input: 'db2://u:p@host/TESTDB?port=70000', expect: { port: 50000 } },
-    { input: 'db2://u:p@host/TESTDB?block_size=512', expect: { blockSize: 65535 } },
     { input: 'Database=TESTDB;Host=h;Port=50001;UID=u;PWD=p', expect: { host: 'h', port: 50001, user: 'u', password: 'p' } },
     { input: 'DATABASE=TESTDB;HOST=h', expect: { host: 'h', database: 'TESTDB' } },
     { input: 'Database=TESTDB;UID=a;UID=b', expect: { user: 'b' } },
@@ -166,6 +165,7 @@ test('DSN parity corpus: URL and key/value edge cases accept or reject consisten
   const rejects = [
     '', '   ', 'db2://host', 'db2://user:pass@host:0/TESTDB', 'db2://user:pass@host:70000/TESTDB',
     'db2://user:pa%ZZss@host/TESTDB', 'db2://u:p@host/TESTDB?Authentication=BOGUS', 'Database=TESTDB;Authentication=TOKEN',
+    'db2://u:p@host/TESTDB?block_size=512', 'db2://u:p@host/TESTDB?block_size=abc', 'Database=TESTDB;block_size=1048577',
   ];
   for (const input of rejects) assert.throws(() => parseDsn(input), undefined, `expected reject: ${input}`);
 });

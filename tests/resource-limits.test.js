@@ -5,6 +5,10 @@ const { DSS_LIMITS } = require('../dist/cjs/network/dss.js');
 const { DB2_RESOURCE_DEFAULTS } = require('../dist/cjs/resources.js');
 
 test('public materialization limits and streaming defaults stay aligned', () => {
+  assert.equal(DSS_LIMITS.maxDssObjectBytes, 64 * 1024 * 1024);
+  assert.equal(DSS_LIMITS.maxDdmObjectBytes, 64 * 1024 * 1024);
+  assert.equal(DSS_LIMITS.maxReplyChainBytes, 256 * 1024 * 1024);
+  assert.equal(DSS_LIMITS.maxReplyChainPackets, 4096);
   assert.equal(DSS_LIMITS.maxLobMaterializationBytes, 16 * 1024 * 1024);
   assert.equal(DSS_LIMITS.maxMaterializedResultBytes, 32 * 1024 * 1024);
   assert.equal(DB2_RESOURCE_DEFAULTS.materializedLobBytes, DSS_LIMITS.maxLobMaterializationBytes);

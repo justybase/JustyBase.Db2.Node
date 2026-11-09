@@ -18,6 +18,11 @@ release decision made through the manual publish workflow.
 - Added the self-contained JDC v1 contract (`docs/DRIVER-CONTRACT.md`) and the
   repo-specific conformance record (`docs/DRIVER-CONTRACT-STATUS.md`). No API or
   behaviour changes.
+- Aligned resource defaults with JDC: 64 MiB DSS, 64 MiB DDM, 256 MiB / 4096
+  reply-chain packets; DSS/DDM/reply-chain overflows now report
+  `resource-limit`. Invalid `block_size` is rejected instead of ignored, and
+  `executeBatch` accepts a `Db2BatchOptions` bound (256 rows / 8 MiB defaults).
+  API snapshot regenerated for the additive type.
 - Added the canonical `authorization`, `parameter-conversion`,
   `server-response`, `operation-cancelled`, `timeout` and `other` categories.
   `Db2Error.canonicalCategory` maps language-specific extras (`server`,

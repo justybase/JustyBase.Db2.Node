@@ -3,7 +3,7 @@ import { publishDb2Diagnostic } from "../diagnostics.js";
 import type { Config } from "../config.js";
 import { normalizeAdminCommand } from "../admin.js";
 import { Db2BatchAbortError, Db2ConnectionClosedError, Db2PoolTimeoutError, Db2PoolExhaustedError, Db2ConnectTimeoutError, operationOutcomeOf } from "../errors.js";
-import { Db2Connection, Db2ProcedureReader, type Db2Parameter, type QueryOptions, type QueryResult, type QueryStreamRow } from "./session.js";
+import { Db2Connection, Db2ProcedureReader, type Db2BatchOptions, type Db2Parameter, type QueryOptions, type QueryResult, type QueryStreamRow } from "./session.js";
 
 export type Db2ConnectionFactory = (input: string | Config) => Promise<Db2Connection>;
 export type Db2PoolOptions = {
@@ -185,7 +185,7 @@ export class Db2Pool {
       options.signal ? { signal: options.signal } : {});
   }
 
-  async executeBatch(sql: string, parameterSets: readonly (readonly unknown[])[], options: QueryOptions = {}): Promise<number> {
+  async executeBatch(sql: string, parameterSets: readonly (readonly unknown[])[], options: QueryOptions & Db2BatchOptions = {}): Promise<number> {
     let started = false;
     try {
       return await this.withConnection(

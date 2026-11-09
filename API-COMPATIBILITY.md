@@ -27,7 +27,7 @@ Low-level DRDA/DDM codecs, code points, EBCDIC/SQLDTA converters, raw transport/
 
 | Tier | Surface | Alpha policy |
 | --- | --- | --- |
-| Supported alpha | Root `@justybase/db2`: `Config`/DSN parsing, `Db2Connection`, `Db2Pool`, structured errors/outcomes, resource limits, values and import API | Changes must be deliberate, documented and reflected in the snapshot. Prefer migration guidance where practical. |
+| Supported alpha | Root `@justybase/db2`: `Config`/DSN parsing, `Db2Connection`, `Db2Pool`, `Db2BatchOptions`, structured errors/outcomes, resource limits, values and import API | Changes must be deliberate, documented and reflected in the snapshot. Prefer migration guidance where practical. |
 | Experimental | `@justybase/db2/compat`, `@justybase/db2/diagnostics`, environment-dependent security/auth helpers reachable through supported APIs | May change between alpha releases; changes must still be explicit and documented. |
 | Internal | DRDA/DDM codecs, code points, raw parser/transport helpers and converter implementation modules | Not public package API. No compatibility promise. |
 
