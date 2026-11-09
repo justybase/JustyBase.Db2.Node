@@ -21,6 +21,25 @@ export type Db2PoolOptions = {
 
 export type Db2PoolAcquireOptions = { signal?: AbortSignal };
 
+/** Default admission and lifecycle bounds. Internal: not part of the package root surface. */
+export const DEFAULT_POOL_LIMITS = Object.freeze({
+  maxConnections: 10,
+  maxWaiters: 100,
+  acquireTimeoutMs: 30_000,
+  connectTimeoutMs: 10_000,
+  idleTimeoutMs: 300_000,
+  maxLifetimeMs: 1_800_000,
+  reapIntervalMs: 30_000,
+});
+
+/** Validates resolved pool bounds. Internal: not part of the package root surface. */
+export function validatePoolLimits(limits: Required<Omit<Db2PoolOptions, "connectionFactory">>): void {
+  for (const [name, value] of Object.entries(limits))
+    if (!Number.isSafeInteger(value) || value < 0 || (name !== "maxWaiters" && value < 1) ||
+      (name.endsWith("Ms") && value > 2_147_483_647))
+      throw new RangeError(`DB2 pool ${name} must be a positive integer within the supported range`);
+}
+
 type Waiter = {
   resolve: (connection: Db2Connection) => void;
   reject: (error: unknown) => void;
@@ -65,16 +84,16 @@ export class Db2Pool {
   private closePromise: Promise<void> | undefined;
 
   constructor(private readonly input: string | Config, options: Db2PoolOptions = {}) {
-    this.maxConnections = options.maxConnections ?? 10;
+    this.maxConnections = options.maxConnections ?? DEFAULT_POOL_LIMITS.maxConnections;
     if (!Number.isSafeInteger(this.maxConnections) || this.maxConnections < 1)
       throw new RangeError("DB2 pool maxConnections must be a positive integer");
-    this.limits = { maxConnections: this.maxConnections, maxWaiters: options.maxWaiters ?? 100,
-      acquireTimeoutMs: options.acquireTimeoutMs ?? 30_000, connectTimeoutMs: options.connectTimeoutMs ?? 10_000,
-      idleTimeoutMs: options.idleTimeoutMs ?? 300_000, maxLifetimeMs: options.maxLifetimeMs ?? 1_800_000,
-      reapIntervalMs: options.reapIntervalMs ?? 30_000 };
-    for (const [name, value] of Object.entries(this.limits))
-      if (!Number.isSafeInteger(value) || value < 1 || (name.endsWith("Ms") && value > 2_147_483_647))
-        throw new RangeError(`DB2 pool ${name} must be a positive integer within the supported range`);
+    this.limits = { maxConnections: this.maxConnections, maxWaiters: options.maxWaiters ?? DEFAULT_POOL_LIMITS.maxWaiters,
+      acquireTimeoutMs: options.acquireTimeoutMs ?? DEFAULT_POOL_LIMITS.acquireTimeoutMs,
+      connectTimeoutMs: options.connectTimeoutMs ?? DEFAULT_POOL_LIMITS.connectTimeoutMs,
+      idleTimeoutMs: options.idleTimeoutMs ?? DEFAULT_POOL_LIMITS.idleTimeoutMs,
+      maxLifetimeMs: options.maxLifetimeMs ?? DEFAULT_POOL_LIMITS.maxLifetimeMs,
+      reapIntervalMs: options.reapIntervalMs ?? DEFAULT_POOL_LIMITS.reapIntervalMs };
+    validatePoolLimits(this.limits);
     this.reaper = setInterval(() => this.reapIdle(), this.limits.reapIntervalMs);
     this.reaper.unref();
     this.connectionFactory = options.connectionFactory ?? ((dsn) => Db2Connection.connect(dsn));

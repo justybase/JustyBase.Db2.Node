@@ -63,6 +63,43 @@ export type Db2BatchOptions = {
   /** Soft encoded-byte budget for one chunk; defaults to 8 MiB. */
   maxBytes?: number;
 };
+
+/** Defaults used when a batch option is omitted. Internal: not part of the package root surface. */
+export function resolveBatchLimits(options: Db2BatchOptions = {}): Required<Db2BatchOptions> {
+  const maxRows = options.maxRows ?? 256;
+  const maxBytes = options.maxBytes ?? 8 * 1024 * 1024;
+  if (!Number.isSafeInteger(maxRows) || maxRows < 1 || maxRows > 32767)
+    throw new RangeError("DB2 batch maxRows must be an integer between 1 and 32767");
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1)
+    throw new RangeError("DB2 batch maxBytes must be a positive safe integer");
+  return { maxRows, maxBytes };
+}
+
+export type ResolvedImportOptions = {
+  policy: "atomic" | "commitEveryRows";
+  maxBatchRows: number;
+  maxBatchBytes: number;
+  notifyAfterRows: number;
+  tableLock: boolean;
+  commandTimeoutMs: number;
+};
+
+/** Defaults used when an import option is omitted. Internal: not part of the package root surface. */
+export function resolveImportOptions(options: Db2ImportOptions = {}): ResolvedImportOptions {
+  const policy = options.policy ?? "atomic";
+  const maxBatchRows = options.maxBatchRows ?? 256;
+  const maxBatchBytes = options.maxBatchBytes ?? 8 * 1024 * 1024;
+  const notifyAfterRows = options.notifyAfterRows ?? 10_000;
+  const tableLock = options.tableLock ?? false;
+  const commandTimeoutMs = options.commandTimeoutMs ?? 0;
+  if (policy !== "atomic" && policy !== "commitEveryRows") throw new TypeError("invalid DB2 import commit policy");
+  if (!Number.isSafeInteger(maxBatchRows) || maxBatchRows < 1) throw new RangeError("DB2 import maxBatchRows must be a positive safe integer");
+  if (!Number.isSafeInteger(maxBatchBytes) || maxBatchBytes < 1) throw new RangeError("DB2 import maxBatchBytes must be a positive safe integer");
+  if (!Number.isSafeInteger(notifyAfterRows) || notifyAfterRows < 1) throw new RangeError("DB2 import notifyAfterRows must be a positive safe integer");
+  if (tableLock && policy !== "atomic") throw new TypeError("DB2 import tableLock requires the atomic policy; commitEveryRows must not be used");
+  if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs < 0 || commandTimeoutMs > 2_147_483_647) throw new RangeError("DB2 import commandTimeoutMs must be an integer between 0 and 2147483647");
+  return { policy, maxBatchRows, maxBatchBytes, notifyAfterRows, tableLock, commandTimeoutMs };
+}
 export type Db2InsertResult = { rowsAffected: number; lastInsertId: bigint };
 export type Db2ParameterDirection = "input" | "output" | "inputOutput";
 /** Output parameters carry a typed placeholder in value for the SQLDTA request. */
@@ -766,12 +803,7 @@ export class Db2Connection {
 
   /** Executes positional parameter sets in order; Db2BatchExecutionError reports acknowledged partial progress. */
   async executeBatch(sql: string, parameterSets: readonly (readonly unknown[])[], options: QueryOptions & Db2BatchOptions = {}): Promise<number> {
-    const maxRows = options.maxRows ?? 256;
-    const maxBytes = options.maxBytes ?? 8 * 1024 * 1024;
-    if (!Number.isSafeInteger(maxRows) || maxRows < 1 || maxRows > 32767)
-      throw new RangeError("DB2 batch maxRows must be an integer between 1 and 32767");
-    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1)
-      throw new RangeError("DB2 batch maxBytes must be a positive safe integer");
+    const { maxRows, maxBytes } = resolveBatchLimits(options);
     let affected = 0;
     let completed = 0;
     let inFlight: number | undefined;
@@ -821,19 +853,8 @@ export class Db2Connection {
   ): Promise<Db2ImportProgress> {
     validateQueryOptions(options);
     validateImportTarget(target);
-    const policy = options.policy ?? "atomic";
-    if (policy !== "atomic" && policy !== "commitEveryRows") throw new TypeError("invalid DB2 import commit policy");
-    const maxBatchRows = options.maxBatchRows ?? 256;
-    const maxBatchBytes = options.maxBatchBytes ?? 8 * 1024 * 1024;
-    if (!Number.isSafeInteger(maxBatchRows) || maxBatchRows < 1) throw new RangeError("DB2 import maxBatchRows must be a positive safe integer");
-    if (!Number.isSafeInteger(maxBatchBytes) || maxBatchBytes < 1) throw new RangeError("DB2 import maxBatchBytes must be a positive safe integer");
+    const { policy, maxBatchRows, maxBatchBytes, notifyAfterRows, tableLock, commandTimeoutMs } = resolveImportOptions(options);
     if (!source || typeof source[Symbol.asyncIterator] !== "function") throw new TypeError("DB2 import source must be an AsyncIterable of rows");
-    const notifyAfterRows = options.notifyAfterRows ?? 10_000;
-    const tableLock = options.tableLock ?? false;
-    const commandTimeoutMs = options.commandTimeoutMs ?? 0;
-    if (!Number.isSafeInteger(notifyAfterRows) || notifyAfterRows < 1) throw new RangeError("DB2 import notifyAfterRows must be a positive safe integer");
-    if (tableLock && policy !== "atomic") throw new TypeError("DB2 import tableLock requires the atomic policy; commitEveryRows must not be used");
-    if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs < 0 || commandTimeoutMs > 2_147_483_647) throw new RangeError("DB2 import commandTimeoutMs must be an integer between 0 and 2147483647");
     const deadlineController = new AbortController();
     const signal = options.signal === undefined
       ? deadlineController.signal
