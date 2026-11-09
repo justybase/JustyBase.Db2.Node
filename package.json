@@ -68,8 +68,8 @@
     "test:integration:db2": "bash scripts/test-db2-integration.sh"
   },
   "devDependencies": {
-    "@babel/parser": "^8.0.7",
-    "@types/node": "^26.5.0",
+    "@babel/parser": "^8.1.0",
+    "@types/node": "^26.6.6",
     "typescript": "^7.0.2"
   }
 }
