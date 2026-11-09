@@ -31,7 +31,7 @@ node tools/sbom/generate-ts-sbom.cjs
 node tools/sbom/check-package-contents.cjs
 ```
 
-Offline mutual-TLS tests require OpenSSL and generate their credentials in a temporary directory. Never add generated private keys to the repository.
+Offline mutual-TLS tests require OpenSSL and generate their credentials in a temporary directory. Never add generated private keys to the repository. The fixture helper fails fast with an install hint when `openssl version` is not available on `PATH` (on Windows, Git for Windows ships it under `C:\Program Files\Git\usr\bin`).
 
 Live Db2 qualification is separate:
 
