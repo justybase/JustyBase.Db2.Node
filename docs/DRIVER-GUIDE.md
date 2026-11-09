@@ -30,7 +30,7 @@ If probing or restoration fails, the connection is discarded rather than reused.
 
 `drainIdle()` closes idle sessions without stopping the pool; `clearAllDb2Pools()` does the same for every live pool. Active leases are untouched and pools reopen sessions on demand. Both are intended for test teardown, not the hot path.
 
-`changeDatabase()` reconnects a direct session to another database with fail-closed guards (no active transaction, no pooled lease, validated name). `setCurrentSchema()` runs a quoted `SET CURRENT SCHEMA` whose lease-local change the pool reset restores on release.
+`changeDatabase()` reconnects a direct session to another database with fail-closed guards (no active transaction, no pooled lease, validated name). `setCurrentSchema()` runs a quoted `SET CURRENT SCHEMA` whose lease-local change the pool reset restores on release; `currentSchema` reports the schema last set by the driver, or `undefined` when it has not set one.
 
 ## Row streaming
 

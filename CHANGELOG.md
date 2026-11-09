@@ -27,6 +27,13 @@ release decision made through the manual publish workflow.
   `Db2BatchExecutionError` now expose phase-derived outcomes, and the pool
   discards a lease whose classified outcome is `unknown`. API snapshot
   regenerated for the additive exports.
+- Added the remaining JDC DSN aliases: `kerberos_spn`, `kerberos_realm`,
+  `krb5_principal` and its `krb5principal`/`kerberos_principal`/
+  `kerberosprincipal`/`client_principal` spellings. Unknown `krb5`/`kerberos`/
+  `gssapi` keys now fail closed, and an explicit empty `currentschema` is
+  rejected. `Db2Connection` exposes a public `currentSchema` getter that reports
+  only a schema the driver set. API snapshot regenerated for the additive
+  exports.
 
 ## [0.1.0-alpha.3] - 2026-10-21
 

@@ -16,6 +16,7 @@ export type Config = {
   securityMechanism: number;
   kerberosSpn: string;
   kerberosRealm: string;
+  kerberosPrincipal: string;
   krb5ConfigFile: string;
   krb5KeytabFile: string;
   krb5CcacheFile: string;
@@ -52,6 +53,7 @@ export function newConfig(): Config {
     securityMechanism: 0,
     kerberosSpn: "",
     kerberosRealm: "",
+    kerberosPrincipal: "",
     krb5ConfigFile: "",
     krb5KeytabFile: "",
     krb5CcacheFile: "",
@@ -149,7 +151,10 @@ export function applyParam(config: Config, key: string, value: string): void {
       break;
     }
     case "database": case "dbname": case "db": config.database = value; break;
-    case "currentschema": case "current_schema": config.currentSchema = value; break;
+    case "currentschema": case "current_schema":
+      if (!value.trim()) throw new DsnError("DB2 current schema must not be empty");
+      config.currentSchema = value;
+      break;
     case "user": case "uid": case "username": config.user = value; break;
     case "password": case "pwd": config.password = value; break;
     case "authentication": {
@@ -185,8 +190,10 @@ export function applyParam(config: Config, key: string, value: string): void {
     }
     case "security_mechanism": case "secmec": case "auth_mechanism": case "auth":
       config.securityMechanism = parseSecurityMechanism(value); break;
-    case "spn": case "service_principal": case "server_principal": config.kerberosSpn = value; break;
-    case "realm": case "krb5_realm": config.kerberosRealm = value; break;
+    case "spn": case "service_principal": case "server_principal": case "kerberos_spn": config.kerberosSpn = value; break;
+    case "realm": case "krb5_realm": case "kerberos_realm": config.kerberosRealm = value; break;
+    case "krb5_principal": case "krb5principal": case "kerberos_principal": case "kerberosprincipal": case "client_principal":
+      config.kerberosPrincipal = value; break;
     case "krb5_config": case "krb5_conf": config.krb5ConfigFile = value; break;
     case "krb5_keytab": case "keytab": config.krb5KeytabFile = value; break;
     case "krb5_ccache": case "ccache": config.krb5CcacheFile = value; break;
@@ -196,7 +203,11 @@ export function applyParam(config: Config, key: string, value: string): void {
     case "client_userid": case "client_user": case "end_user": config.clientUserid = value; break;
     case "client_acctng": case "acctng": case "accounting": config.clientAcctng = value; break;
     case "client_corr_token": case "corr_token": case "correlation_token": config.clientCorrToken = value; break;
-    default: config.params[key] = value;
+    default:
+      if (normalized.startsWith("krb5") || normalized.startsWith("kerberos") || normalized.startsWith("gssapi")) {
+        throw new DsnError(`unknown Kerberos option '${key}'; supported: spn, realm, krb5_principal, krb5_keytab, krb5_ccache, krb5_config, gssapi_token_file`);
+      }
+      config.params[key] = value;
   }
 }
 

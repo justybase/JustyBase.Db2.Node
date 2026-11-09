@@ -53,7 +53,7 @@ function mockConfig(port, over = {}) {
   };
 }
 
-async function serveConnectionSetup(socket, interruptToken = Uint8Array.of(0x04, 0x1c, 0xa7, 0x32)) {
+async function serveConnectionSetup(socket, interruptToken = Uint8Array.of(0x04, 0x1c, 0xa7, 0x32), extraStatements = 0) {
   const reader = new SocketReader(socket);
   assert.deepEqual((await readChain(reader)).map((packet) => packet.codePoint), [CodePoint.EXCSAT, CodePoint.ACCSEC]);
   await reply(socket, CodePoint.ACCSECRD, ddm.packUint16(CodePoint.SECMEC, 3));
@@ -62,6 +62,10 @@ async function serveConnectionSetup(socket, interruptToken = Uint8Array.of(0x04,
   await reply(socket, CodePoint.ACCRDBRM, ddm.packBytes(CodePoint.RDBINTTKN, interruptToken));
   assert.deepEqual((await readChain(reader)).map((packet) => packet.codePoint), [CodePoint.EXCSAT, CodePoint.EXCSQLSET, CodePoint.SQLSTT, CodePoint.RDBCMM]);
   await reply(socket, CodePoint.SQLCARD, sqlCard());
+  for (let index = 0; index < extraStatements; index++) {
+    await readChain(reader);
+    await reply(socket, CodePoint.SQLCARD, sqlCard());
+  }
   return reader;
 }
 
@@ -93,6 +97,26 @@ test('changeDatabase reconnects the session transport to the new database', asyn
   } finally {
     await connection.close();
     await Promise.all(tasks);
+  }
+});
+
+test('connect applies the DSN current schema and reports it', async (t) => {
+  let serverTask;
+  const server = net.createServer((socket) => {
+    serverTask = (async () => {
+      await serveConnectionSetup(socket, undefined, 1);
+      await new Promise((resolve) => socket.once('close', resolve));
+    })();
+    serverTask.catch(() => socket.destroy());
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(() => resolve())));
+  const connection = await Db2Connection.connect(mockConfig(server.address().port, { currentSchema: '  BASE  ' }));
+  try {
+    assert.equal(connection.currentSchema, 'BASE');
+  } finally {
+    await connection.close();
+    await serverTask;
   }
 });
 
@@ -179,8 +203,12 @@ test('setCurrentSchema sends a quoted SET CURRENT SCHEMA', async (t) => {
   const statements = [];
   connection.executeLocked = async (sql) => { statements.push(sql); return 0; };
   try {
+    assert.equal(connection.currentSchema, undefined, 'no driver schema before one is set');
+    connection.preparedSql = 'SELECT 1 FROM SYSIBM.SYSDUMMY1';
     await connection.setCurrentSchema('app');
+    assert.equal(connection.preparedSql, undefined, 'a schema change invalidates prepared state');
     await connection.setCurrentSchema('we"ird');
+    assert.equal(connection.currentSchema, 'we"ird');
     assert.deepEqual(statements, [
       'SET CURRENT SCHEMA "app"',
       'SET CURRENT SCHEMA "we""ird"',

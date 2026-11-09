@@ -61,6 +61,23 @@ test('parses supported authentication modes and keeps unsupported ones fail-clos
   }
 });
 
+test('accepts every JDC Kerberos alias and fails closed on unknown Kerberos keys', () => {
+  const config = parseDsn('Database=TESTDB;kerberos_spn=db2/server@REALM;kerberos_realm=REALM;krb5principal=user@REALM;krb5_config=/etc/krb5.conf;keytab=/tmp/db2.keytab;ccache=/tmp/cc;gssapi_token=/tmp/token.bin');
+  assert.deepEqual(
+    [config.kerberosSpn, config.kerberosRealm, config.kerberosPrincipal, config.krb5ConfigFile, config.krb5KeytabFile, config.krb5CcacheFile, config.gssapiTokenFile],
+    ['db2/server@REALM', 'REALM', 'user@REALM', '/etc/krb5.conf', '/tmp/db2.keytab', '/tmp/cc', '/tmp/token.bin'],
+  );
+  for (const alias of ['kerberos_principal', 'client_principal']) {
+    assert.equal(parseDsn(`Database=TESTDB;${alias}=client@REALM`).kerberosPrincipal, 'client@REALM');
+  }
+  for (const key of ['krb5_ticket_lifetime', 'kerberos_misspelled', 'gssapi_unknown']) {
+    assert.throws(() => parseDsn(`Database=TESTDB;${key}=x`), /unknown Kerberos option/u);
+    assert.throws(() => parseDsn(`db2://host/TESTDB?${key}=x`), /unknown Kerberos option/u);
+  }
+  assert.equal(parseDsn('Database=TESTDB;application_name=app').clientApplName, 'app');
+  assert.equal(parseDsn('Database=TESTDB;custom_option=x').params.custom_option, 'x');
+});
+
 test('rejects empty and invalid URL DSNs without leaking passwords', () => {
   assert.throws(() => parseDsn('  '), /empty DSN/);
   assert.throws(() => parseDsn('db2://u:secret@host/'), /missing database/);
@@ -106,6 +123,7 @@ test('normalizeCurrentSchema trims, defaults empty, and rejects invalid delimite
   assert.throws(() => normalizeCurrentSchema('APP\u0000X'), /NUL byte/);
   // The DSN parser trims values; normalization still runs before I/O in connect().
   assert.equal(parseDsn('Database=TESTDB;CurrentSchema= Sales ').currentSchema, 'Sales');
+  assert.throws(() => parseDsn('Database=TESTDB;CurrentSchema=   '), /must not be empty/u);
 });
 
 test('DSN parity corpus: URL and key/value edge cases accept or reject consistently', () => {

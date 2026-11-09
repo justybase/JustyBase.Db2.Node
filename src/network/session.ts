@@ -450,6 +450,7 @@ export class Db2Connection {
   private baseClientInfo: Db2ClientInfo = { ...this.clientInfo };
   private baseSchema: string | undefined;
   private baseIsolation: string | undefined;
+  private currentSchemaValue: string | undefined;
   private poolBaselineCaptured = false;
   private readonly warningListeners = new Set<(warning: Db2Warning) => void>();
 
@@ -486,6 +487,7 @@ export class Db2Connection {
       if (currentSchema) {
         await connection.execute(`SET CURRENT SCHEMA ${quoteIdentifier(currentSchema)}`);
       }
+      connection.currentSchemaValue = currentSchema || undefined;
       socket.setTimeout(0);
       return connection;
     } catch (error) {
@@ -1139,6 +1141,10 @@ export class Db2Connection {
   /** The database this session is currently connected to. */
   get currentDatabase(): string { return this.config.database; }
 
+  /** CURRENT SCHEMA last set by the driver on this session, or `undefined` when
+   * the driver has not set one. A server default is never reported as driver state. */
+  get currentSchema(): string | undefined { return this.currentSchemaValue; }
+
   /** Switches to another database by reconnecting this session's transport.
    * Fails before any I/O on an empty or invalid name, when a transaction is
    * active, or on a pooled session (acquire with the target DSN instead, so a
@@ -1166,7 +1172,11 @@ export class Db2Connection {
   async setCurrentSchema(schema: string, options: QueryOptions = {}): Promise<void> {
     const target = normalizeCurrentSchema(schema);
     if (!target) throw new TypeError("DB2 current schema must not be empty");
-    return this.exclusive(async () => { await this.executeLocked(`SET CURRENT SCHEMA ${quoteIdentifier(target)}`); }, options);
+    return this.exclusive(async () => {
+      await this.executeLocked(`SET CURRENT SCHEMA ${quoteIdentifier(target)}`);
+      this.preparedSql = undefined;
+      this.currentSchemaValue = target;
+    }, options);
   }
 
   /** Replaces this session's transport with a fresh DRDA negotiation. The caller
@@ -1204,6 +1214,7 @@ export class Db2Connection {
       if (currentSchema) {
         await this.executeLocked(`SET CURRENT SCHEMA ${quoteIdentifier(currentSchema)}`);
       }
+      this.currentSchemaValue = currentSchema || undefined;
       socket.setTimeout(0);
     } catch (error) {
       this.closed = true;
@@ -1253,6 +1264,7 @@ export class Db2Connection {
         throw error;
       }
       // Lease-specific warning subscriptions must not leak into the next borrower.
+      this.currentSchemaValue = normalizeCurrentSchema(this.config.currentSchema) || undefined;
       this.warningListeners.clear();
     });
   }

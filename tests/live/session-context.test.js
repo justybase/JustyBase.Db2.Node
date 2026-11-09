@@ -22,6 +22,7 @@ test('live Db2 setCurrentSchema changes unqualified resolution and rejects inval
   try {
     const schema = uniqueName('CTX_SCHEMA');
     await db.setCurrentSchema(schema);
+    assert.equal(db.currentSchema, schema, 'the public getter reports the driver-set schema');
     assert.deepEqual((await db.query('VALUES CURRENT SCHEMA')).rows, [[schema]], 'CURRENT SCHEMA reflects the change');
 
     await assert.rejects(() => db.setCurrentSchema('   '), TypeError, 'an empty schema is rejected before any statement');
