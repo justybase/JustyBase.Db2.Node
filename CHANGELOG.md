@@ -12,6 +12,20 @@ release decision made through the manual publish workflow.
 
 ### Changed
 
+- `importRows` with a target now groups each batch into multi-row
+  `INSERT ... VALUES (...), (...)` statements (at most 1024 rows per statement)
+  and caches one prepared statement per chunk size. This removes one execute
+  round trip per source row; the plain-SQL `executeBatch` path is unchanged.
+- Abandoning a `queryStream` before it is exhausted now closes the server cursor
+  with `CLSQRY` instead of fetching every remaining block. A close that cannot be
+  confirmed discards the session.
+- The row decoder accepts the `0x42`/`0x43` LONG VARCHAR and `0x1e`/`0x1f` LONG
+  VARBINARY code points, reads DECFLOAT(34) at its 16-byte width, and clamps
+  `MAXBLKEXT` to `0xFFFF` for block sizes above 65535.
+- Query and procedure result decoding is fail-closed: a client-side decode or
+  materialization failure retires the session instead of returning it to a pool,
+  while a server-confirmed SQL error keeps it usable.
+
 - `API-COMPATIBILITY.md` now describes the actual publication state: the
   package is published under the `alpha` dist-tag by the manual `publish.yml`
   workflow, so `private` must not be set and `publishConfig.access` is `public`.

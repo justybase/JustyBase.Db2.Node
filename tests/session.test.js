@@ -41,6 +41,22 @@ function sqlCard(code = 0, state = '00000', affected = 0) {
   return data;
 }
 
+// The importer prepares one multi-row INSERT per chunk; a test double must
+// describe one parameter per marker and split the flattened values back into
+// source rows for its assertions.
+function importStatementColumns(columns) {
+  return async (sql) => {
+    const total = (sql.match(/\?/g) ?? []).length;
+    return { sql, parameterColumns: Array.from({ length: total }, (_, index) => columns[index % columns.length]) };
+  };
+}
+
+function importValuesByRow(values, width) {
+  const rows = [];
+  for (let offset = 0; offset < values.length; offset += width) rows.push(values.slice(offset, offset + width));
+  return rows;
+}
+
 function mockConfig(port, timeoutMs = 2000) {
   return {
     host: '127.0.0.1', port, database: 'TESTDB', user: 'db2inst1', password: 'password', useSsl: false,
@@ -372,10 +388,13 @@ test('row importer batches rows atomically or at confirmed checkpoints with prog
     let prepares = 0;
     connection.prepareLocked = async (sql) => {
       prepares++;
-      assert.equal(sql, 'INSERT INTO "IMPORT_TARGET" ("ID") VALUES (?)');
-      return { sql, parameterColumns: [{ sqlType: 496 }] };
+      assert.match(sql, /^INSERT INTO "IMPORT_TARGET" \("ID"\) VALUES /u);
+      return { sql, parameterColumns: Array.from({ length: (sql.match(/\?/g) ?? []).length }, () => ({ sqlType: 496 })) };
     };
-    connection.executePreparedLocked = async (_statement, values) => { writes.push([...values]); return 1; };
+    connection.executePreparedLocked = async (_statement, values) => {
+      for (const row of importValuesByRow(values, 1)) writes.push(row);
+      return values.length;
+    };
     connection.executeControlLocked = async () => { commits.push(writes.length); };
     const observed = [];
     async function* source() { for (let value = 1; value <= 5; value++) yield [value]; }
@@ -386,7 +405,7 @@ test('row importer batches rows atomically or at confirmed checkpoints with prog
         maxBatchBytes: 1000,
         onProgress: (snapshot) => observed.push(snapshot),
       });
-      assert.equal(prepares, 1);
+      assert.equal(prepares, 2, 'the 1-row validation and the 2-row chunk are prepared; later chunks reuse them');
       assert.deepEqual(writes, [[1], [2], [3], [4], [5]]);
       assert.equal(progress.sourceRowsRead, 5);
       assert.equal(progress.committedRows, 5);
@@ -421,8 +440,11 @@ test('row importer reports periodic progress every notifyAfterRows staged rows',
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     const connection = await Db2Connection.connect(mockConfig(server.address().port));
     const writes = [];
-    connection.prepareLocked = async (sql) => ({ sql, parameterColumns: [{ sqlType: 496 }] });
-    connection.executePreparedLocked = async (_statement, values) => { writes.push([...values]); return 1; };
+    connection.prepareLocked = importStatementColumns([{ sqlType: 496 }]);
+    connection.executePreparedLocked = async (_statement, values) => {
+      for (const row of importValuesByRow(values, 1)) writes.push(row);
+      return values.length;
+    };
     connection.executeControlLocked = async () => {};
     const observed = [];
     async function* source() { for (let value = 1; value <= 5; value++) yield [value]; }
@@ -490,9 +512,12 @@ test('row importer takes an exclusive table lock before the first write', async 
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const connection = await Db2Connection.connect(mockConfig(server.address().port));
   const events = [];
-  connection.prepareLocked = async (sql) => ({ sql, parameterColumns: [{ sqlType: 496 }] });
+  connection.prepareLocked = importStatementColumns([{ sqlType: 496 }]);
   connection.executeLocked = async (sql) => { events.push(`lock:${sql}`); return 0; };
-  connection.executePreparedLocked = async (_statement, values) => { events.push(`write:${values[0]}`); return 1; };
+  connection.executePreparedLocked = async (_statement, values) => {
+    for (const row of importValuesByRow(values, 1)) events.push(`write:${row[0]}`);
+    return values.length;
+  };
   connection.executeControlLocked = async () => {};
   async function* source() { yield [1]; yield [2]; }
   try {
@@ -527,8 +552,8 @@ test('row importer observer error at a periodic boundary keeps the last checkpoi
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => server.close(() => resolve())));
   const connection = await Db2Connection.connect(mockConfig(server.address().port));
-  connection.prepareLocked = async (sql) => ({ sql, parameterColumns: [{ sqlType: 496 }] });
-  connection.executePreparedLocked = async () => 1;
+  connection.prepareLocked = importStatementColumns([{ sqlType: 496 }]);
+  connection.executePreparedLocked = async (_statement, values) => values.length;
   connection.executeControlLocked = async () => {};
   async function* source() { for (let value = 1; value <= 5; value++) yield [value]; }
   try {
@@ -600,8 +625,11 @@ test('row importer combines row and byte limits at the exact boundary and flushe
     const writes = [];
     const commitAt = [];
     const snapshots = [];
-    connection.prepareLocked = async (sql) => ({ sql, parameterColumns: [{ sqlType: 496 }, { sqlType: 448 }] });
-    connection.executePreparedLocked = async (_statement, values) => { writes.push([...values]); return 1; };
+    connection.prepareLocked = importStatementColumns([{ sqlType: 496 }, { sqlType: 448 }]);
+    connection.executePreparedLocked = async (_statement, values) => {
+      for (const row of importValuesByRow(values, 2)) writes.push(row);
+      return values.length / 2;
+    };
     connection.executeControlLocked = async () => commitAt.push(writes.length);
     async function* source() { yield* expectedRows; }
     try {
@@ -650,11 +678,13 @@ test('row importer rolls back a failing checkpoint batch and reports its source 
   const connection = await Db2Connection.connect(mockConfig(server.address().port));
   const writes = [];
   const controls = [];
-  connection.prepareLocked = async (sql) => ({ sql, parameterColumns: [{ sqlType: 496 }] });
+  connection.prepareLocked = importStatementColumns([{ sqlType: 496 }]);
   connection.executePreparedLocked = async (_statement, values) => {
-    writes.push(values[0]);
-    if (values[0] === 3) throw new Error('duplicate key');
-    return 1;
+    for (const row of importValuesByRow(values, 1)) {
+      writes.push(row[0]);
+      if (row[0] === 3) throw new Error('duplicate key');
+    }
+    return values.length;
   };
   connection.executeControlLocked = async (control) => controls.push(control);
   async function* source() { for (let value = 1; value <= 4; value++) yield [value]; }
@@ -699,17 +729,25 @@ test('row importer drains progressive LOBs before advancing source and binds typ
     { name: 'D', sqlType: 412, length: 1_000_000n, precision: 0, scale: 0, nullable: true },
     { name: 'X', sqlType: 988, length: 1_000_000n, precision: 0, scale: 0, nullable: true },
   ];
-  connection.prepareLocked = async (sql) => ({ sql, parameterColumns: columns });
+  connection.prepareLocked = async (sql) => {
+    // The importer prepares a multi-row INSERT per chunk, so the described
+    // parameter list repeats the target columns once per value group.
+    const count = (sql.match(/\?/g) ?? []).length;
+    return { sql, parameterColumns: Array.from({ length: count }, (_, index) => columns[index % columns.length]) };
+  };
   connection.executePreparedLocked = async (_statement, values) => {
-    const row = [];
-    for (const parameter of values) {
-      assert.equal(typeof parameter.source?.[Symbol.asyncIterator], 'function');
-      const chunks = [];
-      for await (const chunk of parameter.source) chunks.push(Buffer.from(chunk));
-      row.push(Buffer.concat(chunks));
+    assert.equal(values.length % columns.length, 0);
+    for (let offset = 0; offset < values.length; offset += columns.length) {
+      const row = [];
+      for (const parameter of values.slice(offset, offset + columns.length)) {
+        assert.equal(typeof parameter.source?.[Symbol.asyncIterator], 'function');
+        const chunks = [];
+        for await (const chunk of parameter.source) chunks.push(Buffer.from(chunk));
+        row.push(Buffer.concat(chunks));
+      }
+      payloads.push(row);
     }
-    payloads.push(row);
-    return 1;
+    return values.length / columns.length;
   };
   connection.executeControlLocked = async () => {};
   async function* source() {
@@ -1284,7 +1322,7 @@ test('queryStream discards the session when the peer resets a progressive LOB ch
   }
 });
 
-test('early row-stream exit drains a later progressive LOB row and keeps the session reusable', async (t) => {
+test('early row-stream exit closes the cursor instead of fetching later blocks', async (t) => {
   let serverTask;
   const server = net.createServer((socket) => {
     serverTask = serveEarlyExitProgressiveLobQuery(socket);
@@ -1822,28 +1860,30 @@ async function serveEarlyExitProgressiveLobQuery(socket, { locatorInSameBlock = 
     assert.equal((await readChain(reader))[0].codePoint, CodePoint.CNTQRY);
     const ordinaryRow = Uint8Array.of(0xff, 0, 42, 0, 0, 0, 0xff);
     if (!locatorInSameBlock) {
+      // The caller abandons the reader after the first row: the later LOB row
+      // is discarded by CLSQRY and must not be fetched or drained.
       await reply(socket, CodePoint.QRYDTA, ordinaryRow);
-      assert.equal((await readChain(reader))[0].codePoint, CodePoint.CNTQRY);
+    } else {
+      const locatorRow = new Uint8Array(24);
+      locatorRow.set([0xff, 0, 43, 0, 0, 0, 0, 3]);
+      const locatorView = new DataView(locatorRow.buffer);
+      locatorView.setBigUint64(8, 1n, false);
+      locatorView.setBigUint64(16, 0x1122_3344_5566_7788n, false);
+      await reply(socket, CodePoint.QRYDTA, Uint8Array.from([...ordinaryRow, ...locatorRow]));
+      assert.equal((await readChain(reader))[0].codePoint, CodePoint.GETNXTCHK);
+      onLocatorRequested();
+      await reply(socket, CodePoint.EXTDTA, Uint8Array.of(0, 0xaa), true);
+      await reply(socket, CodePoint.ENDDTARM, joinBytes(
+        ddm.packUint16(CodePoint.SVRCOD, 0),
+        ddm.packBytes(CodePoint.ENDREF, Uint8Array.of(0xf1)),
+        ddm.packBytes(CodePoint.LSTCHK, Uint8Array.of(0xf1)),
+      ));
     }
-    const locatorRow = new Uint8Array(24);
-    locatorRow.set([0xff, 0, 43, 0, 0, 0, 0, 3]);
-    const locatorView = new DataView(locatorRow.buffer);
-    locatorView.setBigUint64(8, 1n, false);
-    locatorView.setBigUint64(16, 0x1122_3344_5566_7788n, false);
-    await reply(socket, CodePoint.QRYDTA, locatorInSameBlock
-      ? Uint8Array.from([...ordinaryRow, ...locatorRow])
-      : locatorRow);
-    assert.equal((await readChain(reader))[0].codePoint, CodePoint.GETNXTCHK);
-    onLocatorRequested();
-    await reply(socket, CodePoint.EXTDTA, Uint8Array.of(0, 0xaa), true);
-    await reply(socket, CodePoint.ENDDTARM, joinBytes(
-      ddm.packUint16(CodePoint.SVRCOD, 0),
-      ddm.packBytes(CodePoint.ENDREF, Uint8Array.of(0xf1)),
-      ddm.packBytes(CodePoint.LSTCHK, Uint8Array.of(0xf1)),
-    ));
 
-    assert.equal((await readChain(reader))[0].codePoint, CodePoint.CNTQRY);
-    await reply(socket, CodePoint.ENDQRYRM);
+    const close = await readChain(reader);
+    assert.equal(close[0].codePoint, CodePoint.CLSQRY, 'an abandoned reader closes its cursor instead of draining it');
+    assert.ok(ddm.parseDdmParameters(close[0].payload).has(CodePoint.QRYINSID));
+    await reply(socket, CodePoint.SQLCARD, sqlCard());
 
     const reuse = await readChain(reader);
     assert.deepEqual(reuse.map((packet) => packet.codePoint), [CodePoint.PRPSQLSTT, CodePoint.SQLSTT, CodePoint.OPNQRY]);

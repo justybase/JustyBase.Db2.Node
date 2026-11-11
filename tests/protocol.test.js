@@ -6,8 +6,9 @@ const ddm = require('../dist/cjs/network/ddm.js');
 const dss = require('../dist/cjs/network/dss.js');
 const { buildSqlDta } = require('../dist/cjs/converters/sqlDta.js');
 const sqlTypes = require('../dist/cjs/types/sqltype.js');
-const { applyOutputParameterReplyForTest, ensureOutputParameterDataReturnedForTest, hasUnresolvedExternalLocator, stitchOutputExtdtaForTest } = require('../dist/cjs/network/session.js');
+const { applyOutputParameterReplyForTest, decodeRowsForTest, ensureOutputParameterDataReturnedForTest, hasUnresolvedExternalLocator, stitchOutputExtdtaForTest } = require('../dist/cjs/network/session.js');
 const { Db2ServerError } = require('../dist/cjs/errors.js');
+const { encodeDecfloat } = require('../dist/cjs/converters/decfloat.js');
 
 class MemoryReader {
   constructor(bytes) { this.bytes = bytes; this.offset = 0; }
@@ -609,4 +610,41 @@ test('QRYDSC rejects malformed descriptor boundaries instead of partial parses',
   assert.throws(() => ddm.parseQueryDescriptor(Uint8Array.of(7, 0x76, 0xd0, 1, 2, 3, 4)), /invalid length/);
   assert.throws(() => ddm.parseQueryDescriptor(Uint8Array.of(3, 0x76, 0xd0, 0x00)), /trailing invalid bytes/);
   assert.throws(() => ddm.parseQueryDescriptor(Uint8Array.of(6, 0x7f, 0, 1, 2, 3)), /no preceding NGDA/);
+});
+
+test('row decoder accepts LONG VARCHAR 0x42/0x43 and LONG VARBINARY 0x1e/0x1f', () => {
+  const longText = new TextEncoder().encode('long text');
+  const data = Uint8Array.from([
+    0xff, 0x00,
+    0x00, longText.length, ...longText,
+    0x00, 0x00, 0x03, 0x61, 0x62, 0x63,
+    0x01, 0x02, 0x03, 0x04,
+    0x00, 0x05, 0x06, 0x07, 0x08,
+  ]);
+  const rows = decodeRowsForTest([
+    { type: 0x42, ps: Uint8Array.of(0, 0) },
+    { type: 0x43, ps: Uint8Array.of(0, 0) },
+    { type: 0x1e, ps: Uint8Array.of(0, 4) },
+    { type: 0x1f, ps: Uint8Array.of(0, 4) },
+  ], data);
+  assert.deepEqual(rows, [['long text', 'abc', Uint8Array.of(1, 2, 3, 4), Uint8Array.of(5, 6, 7, 8)]]);
+});
+
+test('row decoder reads DECFLOAT(34) with a 16-byte DPD width', () => {
+  const value = '12345678901234567890.12345678901234';
+  const encoded = encodeDecfloat(value, 16);
+  const rows = decodeRowsForTest(
+    [{ type: 0xbb, ps: Uint8Array.of(34, 0) }],
+    Uint8Array.from([0xff, 0x00, 0x00, ...encoded]),
+  );
+  assert.deepEqual(rows, [[value]]);
+});
+
+test('query block sizes above 65535 clamp MAXBLKEXT instead of truncating it', () => {
+  const open = ddm.packOpenQuery('SQLC0X0', '', 1, 'TESTDB', 70000);
+  const params = ddm.parseDdmParameters(open.subarray(4));
+  const getU16 = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint16(0, false);
+  const getU32 = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, false);
+  assert.equal(getU32(params.get(CodePoint.QRYBLKSZ)), 70000);
+  assert.equal(getU16(params.get(CodePoint.MAXBLKEXT)), 0xffff);
 });

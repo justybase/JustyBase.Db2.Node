@@ -296,7 +296,7 @@ function packQueryCommand(codePoint: CodePoint, pkg: string, token: string, sect
   const queryBlockSize = new Uint8Array(8); const view = new DataView(queryBlockSize.buffer);
   view.setUint16(0, 8, false); view.setUint16(2, CodePoint.QRYBLKSZ, false); view.setUint32(4, blockSize, false);
   const maxBlock = new Uint8Array(6); const maxView = new DataView(maxBlock.buffer);
-  maxView.setUint16(0, 6, false); maxView.setUint16(2, CodePoint.MAXBLKEXT, false); maxView.setUint16(4, blockSize & 0xffff, false);
+  maxView.setUint16(0, 6, false); maxView.setUint16(2, CodePoint.MAXBLKEXT, false); maxView.setUint16(4, Math.min(blockSize, 0xffff), false);
   const params = [packPackageNameCsn(db, pkg, token, section), queryBlockSize];
   if (queryInstanceId !== undefined) {
     const queryId = new Uint8Array(12); const idView = new DataView(queryId.buffer);
@@ -351,6 +351,16 @@ export function packCloseProcedureResultSet(section: ResultSetPackageSection, qu
   const id = new Uint8Array(12); const view = new DataView(id.buffer);
   view.setUint16(0, 12, false); view.setUint16(2, CodePoint.QRYINSID, false); view.setBigUint64(4, queryInstanceId, false);
   return packDdmObject(CodePoint.CLSQRY, concat([packResultSetPackageNameCsn(section), id]));
+}
+
+/** Closes an open direct-query cursor by query instance id. */
+export function packCloseQuery(database: string, packageId: string, consistencyToken: string, sectionNumber: number, queryInstanceId: bigint): Uint8Array {
+  const id = new Uint8Array(12);
+  const view = new DataView(id.buffer);
+  view.setUint16(0, 12, false);
+  view.setUint16(2, CodePoint.QRYINSID, false);
+  view.setBigUint64(4, queryInstanceId, false);
+  return packDdmObject(CodePoint.CLSQRY, concat([packPackageNameCsn(database, packageId, consistencyToken, sectionNumber), id]));
 }
 
 export function packSqlStatement(sql: string): Uint8Array {

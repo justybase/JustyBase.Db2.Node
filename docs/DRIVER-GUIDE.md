@@ -36,7 +36,7 @@ If probing or restoration fails, the connection is discarded rather than reused.
 
 `queryStream()` and `queryStreamWithParams()` return async iterables that consume protocol data incrementally.
 
-Breaking out of a stream early triggers cleanup before the connection is returned. A pooled stream holds its lease for the duration of the stream.
+Breaking out of a stream early sends `CLSQRY` for the open cursor instead of fetching the remaining blocks. A confirmed close keeps the session reusable; an unconfirmed close discards it. A pooled stream holds its lease for the duration of the stream.
 
 ## Progressive LOB streaming
 
@@ -87,7 +87,7 @@ A `Db2ProcedureReader` should be finished or closed so remaining cursors can be 
 
 ## Import pipeline
 
-`importRows()` copies an async row source into an existing table using bounded prepared INSERT execution.
+`importRows()` copies an async row source into an existing table using bounded prepared INSERT execution. Each batch is grouped into a multi-row `INSERT ... VALUES (...), (...)` statement of at most 1024 rows, with one cached prepared statement per chunk size.
 
 Policies include atomic and commit-every-rows/checkpoint style behavior. Batches are bounded by row and estimated-byte limits. Progressive source LOBs can be staged in private temporary storage under a shared process quota before the source cursor advances.
 

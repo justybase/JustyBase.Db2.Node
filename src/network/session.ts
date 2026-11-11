@@ -13,7 +13,7 @@ import { Db2AuthenticationError, Db2AuthorizationError, Db2BatchAbortError, Db2B
 import { CodePoint } from "./codepoint.js";
 import {
   ColumnDescription, FieldDescriptor, packAccrdb, packAccsec, packCommit,
-  packCloseProcedureResultSet, packContinueProcedureResultSet, packContinueQuery, packDescribeSqlStatement, packExecSqlImmediate, packExecuteSqlStatement,
+  packCloseProcedureResultSet, packCloseQuery, packContinueProcedureResultSet, packContinueQuery, packDescribeSqlStatement, packExecSqlImmediate, packExecuteSqlStatement,
   packExecuteSqlSet, packExcsat, packExcsatManagerLevels, packOpenQuery,
   packExecuteSqlStatementForResultSets, packOpenQueryWithParams, packPrepareSqlStatement, packRollback, packSecchk, packSqlStatement,
   packGetNextChunk, packInterruptRdbRequest, packSecchkEusridpwd, packSecchkKerberos, packSecchkUsrencpwd,
@@ -83,6 +83,11 @@ export type ResolvedImportOptions = {
   tableLock: boolean;
   commandTimeoutMs: number;
 };
+
+/** Upper bound on one generated multi-row INSERT, independent of the batch size. */
+const IMPORT_MULTI_ROW_MAX_ROWS = 1024;
+/** Parameter-marker ceiling with headroom below Db2's documented 65535 limit. */
+const IMPORT_MULTI_ROW_MAX_PARAMETERS = 32767;
 
 /** Defaults used when an import option is omitted. Internal: not part of the package root surface. */
 export function resolveImportOptions(options: Db2ImportOptions = {}): ResolvedImportOptions {
@@ -193,6 +198,7 @@ type ProcedureCursorState = {
   closed: boolean;
   stalledFrame?: Uint8Array | undefined;
   stalledFrameCount: number;
+  receivedBytes: number;
 };
 type ActiveOperation = {
   throwIfCancelled(): void;
@@ -739,21 +745,37 @@ export class Db2Connection {
         if (completedNormally) throw error;
       }
       let drainedSuccessfully = state.ended && !state.failed;
-      if (state.open && !state.ended) {
+      if (state.open && !state.ended && !state.failed && !this.closed) {
+        // Abandoned reader: close the server cursor instead of fetching every
+        // remaining block. If the close cannot be confirmed, fail closed.
         try {
-          while (state.open && !state.ended) {
-            await this.send(packContinueQuery(this.packageId, this.consistencyToken, this.sectionNumber, this.database, this.queryBlockSize, state.queryId), false, true, state.nextCorrelation);
-            const drainedRows = this.consumeStreamingReplies(await this.readReplyChain(), state);
-            exposeRows(drainedRows);
-            await drainPendingLobs();
+          await this.send(
+            packCloseQuery(this.database, this.packageId, this.consistencyToken, this.sectionNumber, state.queryId),
+            false,
+            true,
+            state.nextCorrelation,
+          );
+          for (const reply of await this.readReplyChain()) {
+            if (reply.codePoint === CodePoint.SQLCARD) {
+              const card = this.parseSqlCardAndReportWarning(reply.payload);
+              if (card.sqlCode < 0) throw sqlError(card.sqlCode, card.sqlState, card.message);
+            } else if (reply.codePoint === CodePoint.SQLERRRM) throw serverError(reply.payload);
           }
-          drainedSuccessfully = state.ended && !state.failed;
+          state.ended = true;
+          // CLSQRY discarded any unread row/EXTDTA bytes server-side; stale
+          // client buffers must not suppress the autocommit of a prepared query.
+          state.pendingRowData = EMPTY_BYTES;
+          state.extdta = [];
+          state.extdtaHead = 0;
+          drainedSuccessfully = true;
         } catch (error) {
           if (isConfirmedInterrupt(error)) {
             state.ended = true;
-            state.failed = true;
+            state.pendingRowData = EMPTY_BYTES;
+            state.extdta = [];
+            state.extdtaHead = 0;
             drainedSuccessfully = true;
-          } else if (!state.ended) {
+          } else {
             this.closed = true;
             this.socket.destroy();
           }
@@ -922,7 +944,11 @@ export class Db2Connection {
         const insertTable = target.schema === undefined
           ? quoteImportIdentifier(target.table)
           : `${quoteImportIdentifier(target.schema)}.${quoteImportIdentifier(target.table)}`;
-        const insertSql = `INSERT INTO ${insertTable} (${target.columns.map(quoteImportIdentifier).join(", ")}) VALUES (${target.columns.map(() => "?").join(", ")})`;
+        const insertSqlForRows = (rows: number): string => {
+          const markers = `(${target.columns.map(() => "?").join(", ")})`;
+          return `INSERT INTO ${insertTable} (${target.columns.map(quoteImportIdentifier).join(", ")}) VALUES ${Array.from({ length: rows }, () => markers).join(", ")}`;
+        };
+        const insertSql = insertSqlForRows(1);
         try { statement = await this.prepareLocked(insertSql); }
         catch (cause) { throw new Db2ImportError("DB2 import could not prepare the destination INSERT", cause, undefined, { ...progress }); }
         if (statement.parameterColumns.length !== target.columns.length)
@@ -933,6 +959,29 @@ export class Db2Connection {
           if (expected !== undefined && actual.sqlType !== expected)
             throw new Db2ImportError(`DB2 import target column ${target.columns[index]} at position ${index} has SQL type ${actual.sqlType}, expected ${expected}`, undefined, undefined, { ...progress });
         }
+
+        // One multi-row INSERT per chunk replaces one EXCSQLSTT round trip per
+        // source row. The generated text and marker count stay bounded by
+        // IMPORT_MULTI_ROW_MAX_ROWS independently of the user's batch size.
+        const insertStatements = new Map<number, Db2Statement>();
+        insertStatements.set(1, statement);
+        const statementForRows = async (rows: number): Promise<Db2Statement> => {
+          const cached = insertStatements.get(rows);
+          if (cached !== undefined) return cached;
+          const prepared = await this.prepareLocked(insertSqlForRows(rows));
+          const expectedParameters = target.columns.length * rows;
+          if (prepared.parameterColumns.length !== expectedParameters)
+            throw new Db2ImportError(`DB2 import multi-row INSERT described ${prepared.parameterColumns.length} parameters for ${expectedParameters} mapped values`, undefined, undefined, { ...progress });
+          for (let index = 0; index < expectedParameters; index++) {
+            const columnIndex = index % target.columns.length;
+            const expected = target.expectedSqlTypes?.[columnIndex];
+            const actual = prepared.parameterColumns[index]!;
+            if (expected !== undefined && actual.sqlType !== expected)
+              throw new Db2ImportError(`DB2 import target column ${target.columns[columnIndex]} at position ${columnIndex} has SQL type ${actual.sqlType}, expected ${expected}`, undefined, undefined, { ...progress });
+          }
+          insertStatements.set(rows, prepared);
+          return prepared;
+        };
 
         type StagedRow = { readonly sourceRow: number; readonly values: readonly unknown[]; readonly bytes: number };
         let batch: StagedRow[] = [];
@@ -948,17 +997,38 @@ export class Db2Connection {
         const commitBatch = async (): Promise<void> => {
           if (batch.length === 0) return;
           startTransaction();
-          for (const row of batch) {
+          const chunkRows = Math.max(1, Math.min(IMPORT_MULTI_ROW_MAX_ROWS, Math.floor(IMPORT_MULTI_ROW_MAX_PARAMETERS / target.columns.length)));
+          for (let offset = 0; offset < batch.length; offset += chunkRows) {
+            const chunk = batch.slice(offset, offset + chunkRows);
+            const firstRow = chunk[0]!;
+            const lastRow = chunk[chunk.length - 1]!;
             throwIfImportAborted(signal);
+            let chunkStatement: Db2Statement;
+            try { chunkStatement = await statementForRows(chunk.length); }
+            catch (cause) {
+              if (cause instanceof Db2ImportError) throw cause;
+              throw new Db2ImportError(`DB2 import could not prepare a ${chunk.length}-row destination INSERT`, cause, firstRow.sourceRow, { ...progress });
+            }
+            const parameters = chunk.flatMap(row => row.values);
             try {
               const affected = await runWithCommandTimeout(
-                () => this.executePreparedLocked(statement!, row.values, true),
-                `row insert for source row ${row.sourceRow}`,
+                () => this.executePreparedLocked(chunkStatement, parameters),
+                chunk.length === 1
+                  ? `row insert for source row ${firstRow.sourceRow}`
+                  : `row insert for source rows ${firstRow.sourceRow}-${lastRow.sourceRow}`,
               );
-              if (affected !== 1) throw new Error(`Db2 confirmed ${affected} inserted rows; expected one for source row ${row.sourceRow}`);
+              if (affected !== chunk.length)
+                throw new Error(`Db2 confirmed ${affected} inserted rows; expected ${chunk.length} for source row${chunk.length === 1 ? "" : "s"} ${firstRow.sourceRow}${chunk.length === 1 ? "" : `-${lastRow.sourceRow}`}`);
             }
             catch (cause) {
-              throw new Db2ImportError(`DB2 import failed writing source row ${row.sourceRow}`, cause, row.sourceRow, { ...progress });
+              throw new Db2ImportError(
+                chunk.length === 1
+                  ? `DB2 import failed writing source row ${firstRow.sourceRow}`
+                  : `DB2 import failed writing source rows ${firstRow.sourceRow}-${lastRow.sourceRow}`,
+                cause,
+                firstRow.sourceRow,
+                { ...progress },
+              );
             }
           }
           const batchRows = batch.length;
@@ -1691,32 +1761,50 @@ export class Db2Connection {
     };
     const rows: unknown[][] = [];
     let materializedResultBytes = 0;
-    const consumeAndResolve = async (replies: Reply[]): Promise<void> => {
-      const blockRows = this.consumeStreamingReplies(replies, state);
-      await this.resolveProgressiveLobs(blockRows, state.fields, state.queryId, state.nextCorrelation);
-      for (const row of blockRows) {
-        const rowBytes = estimateMaterializedRowBytes(row);
-        if (rowBytes > DSS_LIMITS.maxMaterializedResultBytes - materializedResultBytes)
-          throw new Db2ResourceLimitError("DB2 materialized result exceeds the " + DSS_LIMITS.maxMaterializedResultBytes + "-byte limit");
-        materializedResultBytes += rowBytes;
+    try {
+      const consumeAndResolve = async (replies: Reply[]): Promise<void> => {
+        const blockRows = this.consumeStreamingReplies(replies, state);
+        await this.resolveProgressiveLobs(
+          blockRows,
+          state.fields,
+          state.queryId,
+          state.nextCorrelation,
+          DSS_LIMITS.maxMaterializedResultBytes - materializedResultBytes,
+        );
+        for (const row of blockRows) {
+          const rowBytes = estimateMaterializedRowBytes(row);
+          if (rowBytes > DSS_LIMITS.maxMaterializedResultBytes - materializedResultBytes)
+            throw new Db2ResourceLimitError("DB2 materialized result exceeds the " + DSS_LIMITS.maxMaterializedResultBytes + "-byte limit");
+          materializedResultBytes += rowBytes;
+        }
+        for (const row of blockRows) rows.push(row);
+      };
+      await consumeAndResolve(firstReplies);
+      while (state.open && !state.ended) {
+        const priorPending = state.pendingRowData.length;
+        const priorExternal = state.extdta.length - state.extdtaHead;
+        await this.send(packContinueQuery(this.packageId, this.consistencyToken, this.sectionNumber, this.database, this.queryBlockSize, state.queryId), false, true, state.nextCorrelation);
+        const replies = await this.readReplyChain();
+        const gotData = replies.some(reply => reply.codePoint === CodePoint.QRYDTA || reply.codePoint === CodePoint.EXTDTA);
+        await consumeAndResolve(replies);
+        if (!gotData && state.pendingRowData.length === priorPending && state.extdta.length - state.extdtaHead === priorExternal && !state.ended)
+          throw new Error("DB2 CNTQRY returned neither query data nor an end-of-query reply");
       }
-      rows.push(...blockRows);
-    };
-    await consumeAndResolve(firstReplies);
-    while (state.open && !state.ended) {
-      const priorPending = state.pendingRowData.length;
-      const priorExternal = state.extdta.length - state.extdtaHead;
-      await this.send(packContinueQuery(this.packageId, this.consistencyToken, this.sectionNumber, this.database, this.queryBlockSize, state.queryId), false, true, state.nextCorrelation);
-      const replies = await this.readReplyChain();
-      const gotData = replies.some(reply => reply.codePoint === CodePoint.QRYDTA || reply.codePoint === CodePoint.EXTDTA);
-      await consumeAndResolve(replies);
-      if (!gotData && state.pendingRowData.length === priorPending && state.extdta.length - state.extdtaHead === priorExternal && !state.ended)
-        throw new Error("DB2 CNTQRY returned neither query data nor an end-of-query reply");
+      if (state.pendingRowData.length !== 0) throw new Error("DB2 ended a query in the middle of a row");
+      if (state.extdta.length - state.extdtaHead !== 0 || hasUnresolvedExternalLocator(state.fields, rows))
+        throw new Error("DB2 ended a query with unresolved LOB data");
+      return { columns: state.columns, rows };
+    } catch (error) {
+      // A client-side decode/resource error leaves the server cursor open.
+      // Retire the session instead of returning it to a pool for reuse. A
+      // server-confirmed -952 is the one case where Db2 itself ended the
+      // request, so the session stays reusable.
+      if (!state.ended && !isConfirmedInterrupt(error)) {
+        this.closed = true;
+        this.socket.destroy();
+      }
+      throw error;
     }
-    if (state.pendingRowData.length !== 0) throw new Error("DB2 ended a query in the middle of a row");
-    if (state.extdta.length - state.extdtaHead !== 0 || hasUnresolvedExternalLocator(state.fields, rows))
-      throw new Error("DB2 ended a query with unresolved LOB data");
-    return { columns: state.columns, rows };
   }
 
   private async resolveProgressiveLobs(
@@ -1724,9 +1812,10 @@ export class Db2Connection {
     fields: readonly FieldDescriptor[],
     queryId: bigint,
     correlationId: number,
+    remainingResultBytes: number = DSS_LIMITS.maxLobMaterializationBytes,
   ): Promise<void> {
     try {
-      await this.resolveProgressiveLobsCore(rows, fields, queryId, correlationId);
+      await this.resolveProgressiveLobsCore(rows, fields, queryId, correlationId, remainingResultBytes);
     } catch (error) {
       // A locator failure leaves the open cursor's position uncertain. Only the
       // server-confirmed -952 response proves that Db2 ended the active request.
@@ -1743,7 +1832,9 @@ export class Db2Connection {
     fields: readonly FieldDescriptor[],
     queryId: bigint,
     correlationId: number,
+    remainingResultBytes: number,
   ): Promise<void> {
+    let budget = remainingResultBytes;
     for (const row of rows) {
       for (let column = 0; column < fields.length && column < row.length; column++) {
         const progressive = getProgressiveLobReference(row[column]);
@@ -1753,6 +1844,10 @@ export class Db2Connection {
           row[column] = emptyExternalLobValue(field);
           continue;
         }
+        if (progressive.length > BigInt(budget))
+          throw new Db2ResourceLimitError(
+            "DB2 progressive LOB would exceed the remaining " + budget + "-byte result limit",
+          );
 
         const chunks: Uint8Array[] = [];
         let totalLength = 0;
@@ -1772,6 +1867,8 @@ export class Db2Connection {
             }
           }
           const chunk = parseProgressiveChunkReply(replies);
+          if (totalLength + chunk.data.length > budget)
+            throw new Db2ResourceLimitError("DB2 progressive LOB would exceed the remaining materialized result limit");
           if (totalLength + chunk.data.length > DSS_LIMITS.maxLobMaterializationBytes)
             throw new Error("DB2 progressive LOB exceeds the supported materialized-value size");
           chunks.push(chunk.data);
@@ -1779,6 +1876,7 @@ export class Db2Connection {
           if (chunk.endOfReference || chunk.isLastChunk) break;
           if (chunk.data.length === 0) throw new Error("DB2 GETNXTCHK made no progress before the final chunk");
         }
+        budget -= totalLength;
         row[column] = decodeExternalLobValue(field, concat(chunks));
       }
     }
@@ -2017,7 +2115,7 @@ export class Db2Connection {
             current = {
               section: sections[cursors.length]!, columns: [], fields: [], decoderPlan: undefined, rowData: [], rowDataHead: 0, extdta: [], extdtaHead: 0, ended: false,
               queryId: 0n, nextCorrelation: reply.header.correlationId, pendingRowData: new Uint8Array(), readyRows: [], readyRowsHead: 0,
-              lastBlock: false, closed: false, stalledFrameCount: 0,
+              lastBlock: false, closed: false, stalledFrameCount: 0, receivedBytes: 0,
             };
             serverCursorOpened = true;
             const values = findDdmObject(reply.payload, CodePoint.QRYINSID);
@@ -2139,6 +2237,8 @@ export class Db2Connection {
             if (decoded.ended) cursor.ended = true;
             // Pending tail: copy only the remainder, not the full block.
             cursor.pendingRowData = decoded.consumed >= raw.length ? EMPTY_BYTES : raw.subarray(decoded.consumed).slice();
+            if (cursor.pendingRowData.length > DSS_LIMITS.maxMaterializedResultBytes)
+              throw new Db2ResourceLimitError("DB2 procedure row exceeds the " + DSS_LIMITS.maxMaterializedResultBytes + "-byte materialized limit");
             if (TRACE_PROCEDURE_CURSOR) {
               const pendingFirst = cursor.pendingRowData[0];
               const pendingPrefixPossible = pendingFirst === 0
@@ -2363,7 +2463,7 @@ export class Db2Connection {
             const cursor: ProcedureCursorState = {
               section: sections[cursors.length]!, columns: [], fields: [], decoderPlan: undefined, rowData: [], rowDataHead: 0, extdta: [], extdtaHead: 0, ended: false,
               queryId: 0n, nextCorrelation: reply.header.correlationId,
-              pendingRowData: new Uint8Array(), readyRows: [], readyRowsHead: 0, lastBlock: false, closed: false, stalledFrameCount: 0,
+              pendingRowData: new Uint8Array(), readyRows: [], readyRowsHead: 0, lastBlock: false, closed: false, stalledFrameCount: 0, receivedBytes: 0,
             };
             const values = findDdmObject(reply.payload, CodePoint.QRYINSID);
             if (values && values.length >= 8) cursor.queryId = new DataView(values.buffer, values.byteOffset, 8).getBigUint64(0, false);
@@ -2426,22 +2526,31 @@ export class Db2Connection {
         throw new Error(`DB2 declared ${declaredCount} procedure result sets, returned ${sections.length} package sections and opened ${cursors.length} cursors`);
 
       const resultSets: Db2ResultSet[] = [];
+      let materializedProcedureBytes = 0;
       for (const cursor of cursors) {
         if (cursor.queryId === 0n) throw new Error("DB2 left a procedure cursor open without its query instance ID");
         let fetchCount = 0;
         while (!cursor.ended) {
           if (++fetchCount > 65_535) throw new Error("DB2 procedure cursor exceeded the supported fetch-block count");
+          const bytesBefore = cursor.receivedBytes;
           await this.send(packContinueProcedureResultSet(cursor.section, this.queryBlockSize, cursor.queryId), false, true, cursor.nextCorrelation);
           const replies = await this.readReplyChain();
           this.consumeProcedureCursorReplies(replies, cursor);
+          materializedProcedureBytes += cursor.receivedBytes - bytesBefore;
+          if (materializedProcedureBytes > DSS_LIMITS.maxMaterializedResultBytes)
+            throw new Db2ResourceLimitError("DB2 procedure result exceeds the " + DSS_LIMITS.maxMaterializedResultBytes + "-byte materialized limit");
           if (cursor.ended) break;
           const lastData = [...replies].reverse().find(reply => reply.codePoint === CodePoint.QRYDTA);
           if (!lastData) throw new Error("DB2 CNTQRY returned no query data or end-of-query reply for a procedure cursor");
           if (lastData.payload.length < maximumProcedureQueryDataPayload(this.queryBlockSize)) break;
         }
 
+        const closeBytesBefore = cursor.receivedBytes;
         await this.send(packCloseProcedureResultSet(cursor.section, cursor.queryId), false, true, cursor.nextCorrelation);
         this.consumeProcedureCursorReplies(await this.readReplyChain(), cursor);
+        materializedProcedureBytes += cursor.receivedBytes - closeBytesBefore;
+        if (materializedProcedureBytes > DSS_LIMITS.maxMaterializedResultBytes)
+          throw new Db2ResourceLimitError("DB2 procedure result exceeds the " + DSS_LIMITS.maxMaterializedResultBytes + "-byte materialized limit");
         cursor.ended = true;
         const pendingFrames = cursor.rowDataHead === 0 ? cursor.rowData : cursor.rowData.slice(cursor.rowDataHead);
         const availableExtdta = cursor.extdtaHead === 0 ? cursor.extdta : cursor.extdta.slice(cursor.extdtaHead);
@@ -2449,6 +2558,11 @@ export class Db2Connection {
         const rows = plan
           ? decodeRowsWithPlan(plan, concat(pendingFrames), this.littleEndian, (warning) => this.reportWarning(warning)).rows
           : [];
+        for (const row of rows) {
+          materializedProcedureBytes += estimateMaterializedRowBytes(row);
+          if (materializedProcedureBytes > DSS_LIMITS.maxMaterializedResultBytes)
+            throw new Db2ResourceLimitError("DB2 procedure result exceeds the " + DSS_LIMITS.maxMaterializedResultBytes + "-byte materialized limit");
+        }
         const extdtaUsed = stitchExtdta(cursor.fields, rows, availableExtdta);
         if (extdtaUsed !== availableExtdta.length || hasUnresolvedExternalLocator(cursor.fields, rows))
           throw new Error("DB2 returned procedure-cursor EXTDTA values that do not match the QRYDSC LOB descriptors");
@@ -2482,12 +2596,16 @@ export class Db2Connection {
       switch (reply.codePoint) {
         case CodePoint.QRYDTA: {
           const maximumPayload = maximumProcedureQueryDataPayload(this.queryBlockSize);
+          cursor.receivedBytes += reply.payload.length;
           cursor.rowData.push(reply.payload);
           cursor.lastBlock = reply.payload.length < maximumPayload;
           if (TRACE_PROCEDURE_CURSOR) traceProcedureCursor(`QRYDTA payloadLength=${reply.payload.length} maximumPayload=${maximumPayload} short=${cursor.lastBlock}`);
           break;
         }
-        case CodePoint.EXTDTA: cursor.extdta.push(reply.payload); break;
+        case CodePoint.EXTDTA:
+          cursor.receivedBytes += reply.payload.length;
+          cursor.extdta.push(reply.payload);
+          break;
         case CodePoint.ENDQRYRM: cursor.ended = true; break;
         case CodePoint.QRYDSC:
           cursor.fields = parseQueryDescriptor(reply.payload);
@@ -2593,6 +2711,8 @@ export class Db2Connection {
     } catch (error) { state.failed = true; throw error; }
     // Pending tail: only the unconsumed remainder is copied, never the full block.
     state.pendingRowData = decoded.consumed >= block.length ? EMPTY_BYTES : block.subarray(decoded.consumed).slice();
+    if (state.pendingRowData.length > DSS_LIMITS.maxMaterializedResultBytes)
+      throw new Db2ResourceLimitError("DB2 row exceeds the " + DSS_LIMITS.maxMaterializedResultBytes + "-byte materialized limit");
     if (decoded.ended) state.ended = true;
     if (plan?.hasLobs && decoded.rows.length > 0 && state.extdta.length > state.extdtaHead) {
       const available = state.extdtaHead === 0 ? state.extdta : state.extdta.slice(state.extdtaHead);
@@ -3444,14 +3564,14 @@ function decodeRowsWithPlan(
         case 0x0a: case 0x0b: ensure(8); row[index] = view.getFloat64(offset, littleEndian); offset += 8; break;
         case 0x0c: case 0x0d: ensure(4); row[index] = view.getFloat32(offset, littleEndian); offset += 4; break;
         case 0x30: case 0x31: case 0x3c: case 0x3d: { ensure(ps); row[index] = utf8.decode(data.subarray(offset, offset + ps)); offset += ps; break; }
-        case 0x32: case 0x33: case 0x34: case 0x35: case 0x3e: case 0x3f: case 0x40: case 0x41: { const length = readLength(); ensure(length); row[index] = utf8.decode(data.subarray(offset, offset + length)); offset += length; break; }
+        case 0x32: case 0x33: case 0x34: case 0x35: case 0x3e: case 0x3f: case 0x40: case 0x41: case 0x42: case 0x43: { const length = readLength(); ensure(length); row[index] = utf8.decode(data.subarray(offset, offset + length)); offset += length; break; }
         case 0x36: case 0x37: { const length = ps * 2; ensure(length); row[index] = decodeUtf16Be(data.subarray(offset, offset + length)); offset += length; break; }
         case 0x38: case 0x39: case 0x3a: case 0x3b: { const length = readLength() * 2; ensure(length); row[index] = decodeUtf16Be(data.subarray(offset, offset + length)); offset += length; break; }
         case 0x20: case 0x21: case 0x22: case 0x23: case 0x24: case 0x25: { ensure(ps); row[index] = utf8.decode(data.subarray(offset, offset + ps)).trimEnd(); offset += ps; break; }
         case 0x0e: case 0x0f: { const length = Math.floor(((ps >> 8) + 2) / 2); ensure(length); row[index] = decodePackedDecimal(data.subarray(offset, offset + length), ps & 0xff); offset += length; break; }
-        case 0xba: case 0xbb: { const length = (ps >> 8) === 16 || (ps & 0xff) === 16 ? 16 : 8; ensure(length); row[index] = decodeDecfloat(data.subarray(offset, offset + length)); offset += length; break; }
+        case 0xba: case 0xbb: { const length = (ps >> 8) >= 16 || (ps & 0xff) === 16 ? 16 : 8; ensure(length); row[index] = decodeDecfloat(data.subarray(offset, offset + length)); offset += length; break; }
         case 0xbe: case 0xbf: { ensure(ps); row[index] = ps > 0 && data[offset + ps - 1] !== 0; offset += ps; break; }
-        case 0x26: case 0x27: case 0xc0: case 0xc1: { const length = ps & 0x7fff; ensure(length); row[index] = data.subarray(offset, offset + length); offset += length; break; }
+        case 0x26: case 0x27: case 0x1e: case 0x1f: case 0xc0: case 0xc1: { const length = ps & 0x7fff; ensure(length); row[index] = data.subarray(offset, offset + length); offset += length; break; }
         case 0x28: case 0x29: case 0x2a: case 0x2b: case 0xc2: case 0xc3: { const length = readLength(); ensure(length); row[index] = data.subarray(offset, offset + length); offset += length; break; }
         case 0x10: case 0x11: case 0x18: case 0x19: case 0x1a: case 0x1b: case 0x1c: case 0x1d:
         case 0xcc: // Non-nullable DBCLOB, observed in direct DBCLOB expression results.
@@ -3690,6 +3810,14 @@ export function hasUnresolvedExternalLocator(fields: readonly FieldDescriptor[],
     }
   }
   return false;
+}
+
+export function decodeRowsForTest(
+  fields: readonly FieldDescriptor[],
+  data: Uint8Array,
+  littleEndian = true,
+): unknown[][] {
+  return decodeRows([...fields], data, littleEndian);
 }
 
 export function stitchOutputExtdtaForTest(
