@@ -4,11 +4,11 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/) and this
 project uses [Semantic Versioning](https://semver.org/).
 
-Version policy: the current version is `0.1.0-alpha.3`, published to npm as
+Version policy: the current version is `0.1.0-alpha.4`, published to npm as
 `@justybase/db2` under the `alpha` dist-tag. Each publication is an explicit
 release decision made through the manual publish workflow.
 
-## [Unreleased]
+## [0.1.0-alpha.4] - 2026-11-11
 
 ### Changed
 

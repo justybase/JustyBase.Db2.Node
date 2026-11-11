@@ -72,7 +72,7 @@ The observable behaviour implemented here is defined by [JDC v1](docs/DRIVER-CON
 
 ## Installation
 
-The current alpha is published to npm as `@justybase/db2@0.1.0-alpha.3` under the `alpha` dist-tag:
+The current alpha is published to npm as `@justybase/db2@0.1.0-alpha.4` under the `alpha` dist-tag:
 
 ```bash
 npm install @justybase/db2@alpha
